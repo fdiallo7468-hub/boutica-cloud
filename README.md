@@ -1,4 +1,4 @@
-# Boutica Backend
+# Boutica Cloud
 
 NestJS + TypeScript + PostgreSQL (Drizzle ORM, via Neon) backend for
 Boutica, a commerce/inventory management platform for retail merchants.
@@ -226,7 +226,7 @@ Store/Business — see AUDIT_REPORT.md section D for how each is modeled, and
 ## Déploiement Render
 
 1. Créer un **Web Service** sur [render.com](https://render.com).
-2. Connecter ce dépôt GitHub (`boutica-backend`).
+2. Connecter ce dépôt GitHub (`boutica-cloud`).
 3. Paramètres du service :
    - **Environment** : Node
    - **Build Command** : `npm install && npm run build`
