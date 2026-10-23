@@ -8,6 +8,13 @@
       "when": 1791098735766,
       "tag": "0000_flat_jack_power",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791098735767,
+      "tag": "0001_add_image_url_to_products_and_variants",
+      "breakpoints": true
     }
   ]
 }
