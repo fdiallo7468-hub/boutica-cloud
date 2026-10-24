@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1791098735766,
+      "tag": "0000_flat_jack_power",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792664919277,
+      "tag": "0001_auth_evolution_business_user_fields",
+      "breakpoints": true
+    }
+  ]
+}
