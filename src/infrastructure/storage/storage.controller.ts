@@ -1,3 +1,5 @@
+import type { Express } from 'express';
+import 'multer';
 import {
   Body,
   Controller,
