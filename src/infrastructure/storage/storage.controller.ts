@@ -5,11 +5,13 @@ import {
   Get,
   Post,
   Query,
+  Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { CurrentTenant } from '../../modules/auth/current-tenant.decorator';
 import { Tenant } from '../../modules/auth/tenant.type';
 import { GetPresignedUrlDto } from './dto/get-presigned-url.dto';
@@ -21,7 +23,7 @@ import { StorageService } from './storage.service';
 export class StorageController {
   constructor(private readonly storageService: StorageService) {}
 
-  @ApiOperation({ summary: 'Obtenir une URL pré-signée pour upload direct depuis le client mobile ou web' })
+  @ApiOperation({ summary: 'Obtenir une URL d upload direct depuis le client mobile ou web' })
   @Post('presigned-url')
   async getPresignedUrl(
     @CurrentTenant() tenant: Tenant,
@@ -63,7 +65,7 @@ export class StorageController {
     );
   }
 
-  @ApiOperation({ summary: 'Générer une URL de téléchargement pré-signée sécurisée' })
+  @ApiOperation({ summary: 'Générer une URL de téléchargement sécurisée' })
   @Get('download-url')
   async getDownloadUrl(
     @CurrentTenant() tenant: Tenant,
@@ -71,6 +73,19 @@ export class StorageController {
   ) {
     const url = await this.storageService.getPresignedDownloadUrl(tenant.businessId, key);
     return { key, url };
+  }
+
+  @ApiOperation({ summary: 'Télécharger ou afficher directement un fichier média stocké' })
+  @Get('file')
+  async getFile(
+    @CurrentTenant() tenant: Tenant,
+    @Query('key') key: string,
+    @Res() res: Response,
+  ) {
+    const fileInfo = await this.storageService.getFile(tenant.businessId, key);
+    res.setHeader('Content-Type', fileInfo.mimeType);
+    res.setHeader('Content-Disposition', `inline; filename="${fileInfo.filename}"`);
+    res.sendFile(fileInfo.absolutePath);
   }
 
   @ApiOperation({ summary: 'Supprimer un média appartenant à son entreprise' })

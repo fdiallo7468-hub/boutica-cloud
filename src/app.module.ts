@@ -1,3 +1,4 @@
+import { StorageModule } from "./infrastructure/storage/storage.module";
 import { AppController } from "./app.controller";
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -54,6 +55,7 @@ import { AuthExtensionModule } from './modules/auth/auth-extension.module';
     ReportsModule,
     HealthModule,
     AuthExtensionModule,
+    StorageModule,
   ],
   controllers: [AppController],
   providers: [

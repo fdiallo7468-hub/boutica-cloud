@@ -15,18 +15,8 @@ export const envSchema = z
     ARCJET_KEY: z.string().optional(),
     ARCJET_ENV: z.enum(['development', 'production', 'test']).optional(),
 
-    // Phase 3: Cloudflare R2 Storage (S3-compatible)
-    R2_ACCOUNT_ID: z.string().optional(),
-    R2_ACCESS_KEY_ID: z.string().optional(),
-    R2_SECRET_ACCESS_KEY: z.string().optional(),
-    R2_BUCKET_NAME: z.string().optional(),
-    R2_PUBLIC_URL: z.string().url().optional(),
-
-    // Phase 5: Redis & BullMQ Asynchronous Queues
-    REDIS_URL: z.string().optional(),
-    REDIS_HOST: z.string().optional(),
-    REDIS_PORT: z.coerce.number().int().positive().optional(),
-    REDIS_PASSWORD: z.string().optional(),
+    // Stockage Médias local zéro-coût (remplace Cloudflare R2)
+    UPLOADS_DIR: z.string().optional().default("./uploads"),
 
     // Phase 6: Novu Notification Engine
     NOVU_API_KEY: z.string().optional(),
