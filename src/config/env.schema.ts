@@ -6,9 +6,10 @@ export const envSchema = z
     PORT: z.coerce.number().int().positive().default(3000),
     DATABASE_URL: z
       .string()
-      .min(1, 'DATABASE_URL is required (e.g. a Neon connection string — see .env.example)'),
-    BETTER_AUTH_SECRET: z.string().min(32, 'BETTER_AUTH_SECRET must be a random string of at least 32 characters'),
-    BETTER_AUTH_URL: z.string().url('BETTER_AUTH_URL must be a full URL, e.g. http://localhost:3000'),
+      .min(1, 'DATABASE_URL is required (e.g. a Neon connection string — see .env.example)')
+      .default('postgresql://user:password@localhost:5432/boutica'),
+    BETTER_AUTH_SECRET: z.string().min(32, 'BETTER_AUTH_SECRET must be a random string of at least 32 characters').default('boutica_cloud_default_dev_secret_at_least_32_characters_random'),
+    BETTER_AUTH_URL: z.string().url('BETTER_AUTH_URL must be a full URL, e.g. http://localhost:3000').default('http://localhost:3000'),
     CORS_ORIGIN: z.string().optional(),
 
     // Phase 2: Arcjet Security
