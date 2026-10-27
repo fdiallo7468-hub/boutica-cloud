@@ -1,3 +1,4 @@
+import { AppController } from "./app.controller";
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
@@ -54,6 +55,7 @@ import { AuthExtensionModule } from './modules/auth/auth-extension.module';
     HealthModule,
     AuthExtensionModule,
   ],
+  controllers: [AppController],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_FILTER, useClass: DomainExceptionFilter },

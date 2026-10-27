@@ -1,0 +1,6 @@
+{
+  "name": "Boutica Cloud",
+  "description": "Backend Cloud et plateforme de gestion Boutica — génération PDF et exports officiels.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

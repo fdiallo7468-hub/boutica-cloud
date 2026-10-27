@@ -66,7 +66,8 @@ async function bootstrap() {
     .build();
   SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swaggerConfig));
 
-  const port = config.get('PORT', { infer: true });
+  const configuredPort = config.get('PORT', { infer: true });
+  const port = configuredPort === 8080 ? 3000 : (configuredPort || 3000);
   await app.listen(port);
   logger.log(`Boutica backend listening on port ${port}`);
 }

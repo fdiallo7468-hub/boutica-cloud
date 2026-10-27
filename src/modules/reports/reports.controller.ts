@@ -141,7 +141,6 @@ export class ReportsController {
 
   @ApiOperation({ summary: 'Générer et télécharger le rapport des ventes en PDF professionnel' })
   @Get('sales/pdf')
-  @Header('Content-Type', 'application/pdf')
   async exportSalesPdf(
     @CurrentTenant() tenant: Tenant,
     @Query() query: DashboardQueryDto,
@@ -152,18 +151,19 @@ export class ReportsController {
     const to = query.to ? new Date(query.to) : now;
     const buffer = await this.reportsService.exportSalesPdf(tenant.businessId, from, to);
 
+    res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="rapport-ventes-${from.toISOString().slice(0, 10)}.pdf"`);
     res.end(buffer);
   }
 
   @ApiOperation({ summary: 'Générer et télécharger l\'état des stocks en PDF professionnel' })
   @Get('inventory/pdf')
-  @Header('Content-Type', 'application/pdf')
   async exportInventoryPdf(
     @CurrentTenant() tenant: Tenant,
     @Res() res: Response,
   ) {
     const buffer = await this.reportsService.exportInventoryPdf(tenant.businessId);
+    res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="etat-stocks-${new Date().toISOString().slice(0, 10)}.pdf"`);
     res.end(buffer);
   }

@@ -14,7 +14,18 @@ export class HealthController {
   @Public()
   @Get()
   async check() {
-    await this.db.db.execute(sql`select 1`);
-    return { status: 'ok', service: 'boutica-backend', timestamp: new Date().toISOString() };
+    let dbStatus = 'connected';
+    try {
+      await this.db.db.execute(sql`select 1`);
+    } catch {
+      dbStatus = 'disconnected';
+    }
+    return {
+      status: 'ok',
+      service: 'boutica-backend',
+      version: '2.1.0',
+      database: dbStatus,
+      timestamp: new Date().toISOString(),
+    };
   }
 }

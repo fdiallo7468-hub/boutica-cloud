@@ -47,6 +47,10 @@ export const envSchema = z
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().default("Boutica Cloud <notifications@boutica.cloud>"),
     RESET_PASSWORD_URL: z.string().url().optional(),
+
+    // Puppeteer & PDF Generation
+    PUPPETEER_CACHE_DIR: z.string().optional(),
+    PUPPETEER_EXECUTABLE_PATH: z.string().optional(),
   })
   .refine((env) => env.NODE_ENV !== 'production' || !!env.CORS_ORIGIN, {
     message: 'CORS_ORIGIN must be set explicitly when NODE_ENV=production (comma-separated origins)',

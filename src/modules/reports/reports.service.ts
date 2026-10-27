@@ -1,7 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { and, desc, eq, gte, lte } from 'drizzle-orm';
 import ExcelJS from 'exceljs';
-import puppeteer from 'puppeteer';
+import puppeteer, { type Browser, type Page, type LaunchOptions } from 'puppeteer';
 import { DatabaseService } from '../../infrastructure/database/database';
 import {
   products,
@@ -346,9 +346,10 @@ export class ReportsService {
   }
 
   private async renderHtmlToPdf(html: string): Promise<Buffer> {
-    let browser: any = null;
+    let browser: Browser | null = null;
+    let page: Page | null = null;
     try {
-      browser = await puppeteer.launch({
+      const launchOptions: LaunchOptions = {
         headless: true,
         args: [
           '--no-sandbox',
@@ -356,8 +357,14 @@ export class ReportsService {
           '--disable-dev-shm-usage',
           '--disable-gpu',
         ],
-      });
-      const page = await browser.newPage();
+      };
+
+      if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+        launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+      }
+
+      browser = await puppeteer.launch(launchOptions);
+      page = await browser.newPage();
       await page.setContent(html, { waitUntil: 'domcontentloaded' });
       const pdfBuffer = await page.pdf({
         format: 'A4',
@@ -366,11 +373,21 @@ export class ReportsService {
       });
       return Buffer.from(pdfBuffer);
     } catch (err: any) {
-      this.logger.error(`Erreur génération PDF Puppeteer: ${err.message}. Bascule sur buffer HTML.`);
-      return Buffer.from(html, 'utf-8');
+      this.logger.error(`Erreur génération PDF Puppeteer: ${err?.message || err}`, err?.stack);
+      throw new InternalServerErrorException(
+        'Impossible de générer le document PDF pour le moment. Veuillez réessayer ultérieurement.',
+        { cause: err },
+      );
     } finally {
+      if (page) {
+        await page.close().catch((closeErr: any) => {
+          this.logger.warn(`Erreur fermeture page Puppeteer: ${closeErr?.message || closeErr}`);
+        });
+      }
       if (browser) {
-        await browser.close().catch(() => {});
+        await browser.close().catch((closeErr: any) => {
+          this.logger.warn(`Erreur fermeture navigateur Puppeteer: ${closeErr?.message || closeErr}`);
+        });
       }
     }
   }
