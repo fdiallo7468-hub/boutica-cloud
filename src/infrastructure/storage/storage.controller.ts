@@ -42,12 +42,14 @@ export class StorageController {
   @ApiOperation({ summary: 'Uploader directement un fichier média (images produits, documents)' })
   @ApiConsumes('multipart/form-data')
   @ApiQuery({ name: 'folder', required: false, description: 'Dossier de destination (ex: products, invoices)' })
+  @ApiQuery({ name: 'key', required: false, description: 'Clé réservée lors du getPresignedUrl (optionnel)' })
   @ApiBody({
     schema: {
       type: 'object',
       properties: {
         file: { type: 'string', format: 'binary' },
         folder: { type: 'string' },
+        key: { type: 'string' },
       },
     },
   })
@@ -65,12 +67,15 @@ export class StorageController {
     @UploadedFile() file?: Express.Multer.File,
     @Body('folder') bodyFolder?: string,
     @Query('folder') queryFolder?: string,
+    @Body('key') bodyKey?: string,
+    @Query('key') queryKey?: string,
   ) {
     if (!file || !file.buffer || file.buffer.length === 0) {
       throw new BadRequestException('Aucun fichier fourni dans la requête (champ "file" requis)');
     }
 
     const folder = (bodyFolder || queryFolder || 'products').trim();
+    const key = (bodyKey || queryKey || '').trim() || undefined;
 
     return this.storageService.uploadDirect(
       tenant.businessId,
@@ -78,6 +83,7 @@ export class StorageController {
       file.originalname,
       file.buffer,
       file.mimetype,
+      key,
     );
   }
 

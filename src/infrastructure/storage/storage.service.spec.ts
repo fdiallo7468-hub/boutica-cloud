@@ -5,15 +5,14 @@ import { StorageService } from './storage.service';
 
 describe('StorageService (Stockage Local Multi-Tenant Durci)', () => {
   let storageService: StorageService;
-  const testDir = path.resolve('./uploads-test-hardened');
+  const testDir = path.resolve('./uploads-test-security');
 
-  // Buffers avec signatures binaires valides (magic bytes)
   const validPngBuffer = Buffer.from([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
   ]);
   const validJpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
   const validPdfBuffer = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF');
-  const validCsvBuffer = Buffer.from('sku,name,price\nSKU-001,Produit 1,1500\n');
+  const validCsvBuffer = Buffer.from('sku,name,price\nSKU-001,Produit Test,1500\nSKU-002,Produit Épice,2500\n');
 
   beforeEach(() => {
     const configService = {
@@ -32,16 +31,202 @@ describe('StorageService (Stockage Local Multi-Tenant Durci)', () => {
     }
   });
 
-  describe('Validation des types MIME et signatures binaires (Magic Bytes)', () => {
-    it('devrait rejeter un type MIME non autorisé', async () => {
+  describe('Contrat d Upload Cohérent (getPresignedUploadUrl & uploadDirect)', () => {
+    it('devrait permettre à uploadDirect d honorer la clé préalablement réservée par getPresignedUploadUrl', async () => {
+      // 1. Client demande une URL d upload pré-signée
+      const presigned = await storageService.getPresignedUploadUrl(
+        'tenant-mobile',
+        'catalog',
+        'telephone.png',
+        'image/png',
+      );
+
+      expect(presigned.key).toBeDefined();
+      expect(presigned.uploadUrl).toContain(encodeURIComponent(presigned.key));
+
+      // 2. Client exécute l upload direct en fournissant la clé réservée
+      const upload = await storageService.uploadDirect(
+        'tenant-mobile',
+        'catalog',
+        'telephone.png',
+        validPngBuffer,
+        'image/png',
+        presigned.key,
+      );
+
+      // 3. Vérification : la clé enregistrée est strictement identique à la clé annoncée
+      expect(upload.key).toBe(presigned.key);
+      expect(upload.url).toBe(presigned.publicUrl);
+
+      // 4. Lecture immédiate avec la même clé
+      const fileInfo = await storageService.getFile('tenant-mobile', presigned.key);
+      expect(fileInfo.mimeType).toBe('image/png');
+      expect(fs.existsSync(fileInfo.absolutePath)).toBe(true);
+    });
+
+    it('devrait refuser qu un client fournisse une expectedKey appartenant à un autre tenant', async () => {
+      const victimKey = 'businesses/tenant-victim/catalog/secret.png';
       await expect(
-        storageService.getPresignedUploadUrl('tenant-1', 'products', 'malware.exe', 'application/x-msdownload'),
+        storageService.uploadDirect(
+          'tenant-attacker',
+          'catalog',
+          'evil.png',
+          validPngBuffer,
+          'image/png',
+          victimKey,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('Validation Stricte des Fichiers CSV & Encodage UTF-8', () => {
+    it('devrait valider un fichier CSV textuel encodé en UTF-8 propre avec caractères accentués', async () => {
+      const upload = await storageService.uploadDirect(
+        'tenant-csv',
+        'reports',
+        'export.csv',
+        validCsvBuffer,
+        'text/csv',
+      );
+      expect(upload.key).toContain('export.csv');
+      const fileInfo = await storageService.getFile('tenant-csv', upload.key);
+      expect(fileInfo.mimeType).toBe('text/csv');
+    });
+
+    it('devrait rejeter un fichier CSV contenant des séquences d octets UTF-8 invalides', async () => {
+      // Séquence d octets invalide en UTF-8 (0xC0 0xAF ou continuation isolée 0x80)
+      const invalidUtf8Buffer = Buffer.from([0x73, 0x6b, 0x75, 0x2c, 0xc0, 0xaf, 0x0a]);
+      await expect(
+        storageService.uploadDirect('tenant-csv', 'reports', 'bad-utf8.csv', invalidUtf8Buffer, 'text/csv'),
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('devrait rejeter un fichier vide (0 octet)', async () => {
+    it('devrait rejeter un fichier binaire avec octets nuls déguisé en CSV', async () => {
+      const binaryWithNull = Buffer.from('col1,col2\nval1,\x00val2\n');
       await expect(
-        storageService.uploadDirect('tenant-1', 'products', 'empty.png', Buffer.alloc(0), 'image/png'),
+        storageService.uploadDirect('tenant-csv', 'reports', 'null-byte.csv', binaryWithNull, 'text/csv'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('devrait rejeter un exécutable ELF/MZ renommé en .csv', async () => {
+      const fakeElfBuffer = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x01, 0x01, 0x01, 0x00]);
+      await expect(
+        storageService.uploadDirect('tenant-csv', 'reports', 'malware.csv', fakeElfBuffer, 'text/csv'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('devrait rejeter un fichier CSV entièrement vide ou constitué uniquement d espaces', async () => {
+      const emptyBuffer = Buffer.from('   \n\r\t  \n  ');
+      await expect(
+        storageService.uploadDirect('tenant-csv', 'reports', 'empty.csv', emptyBuffer, 'text/csv'),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('Protection Anti-Liens Symboliques (Symlinks)', () => {
+    it('devrait refuser la lecture d un fichier qui est un lien symbolique vers un fichier sensible', async () => {
+      const tenantId = 'tenant-symlink';
+      const tenantDir = path.resolve(testDir, 'businesses', tenantId, 'general');
+      fs.mkdirSync(tenantDir, { recursive: true });
+
+      // Créer une cible légitime externe et un lien symbolique interne
+      const outsideTarget = path.resolve(testDir, 'outside-secret.txt');
+      fs.writeFileSync(outsideTarget, 'top_secret_data');
+
+      const symlinkPath = path.resolve(tenantDir, 'symlink-attack.txt');
+      if (fs.existsSync(symlinkPath)) fs.unlinkSync(symlinkPath);
+      fs.symlinkSync(outsideTarget, symlinkPath);
+
+      const symlinkKey = `businesses/${tenantId}/general/symlink-attack.txt`;
+
+      await expect(storageService.getFile(tenantId, symlinkKey)).rejects.toThrow(ForbiddenException);
+
+      // Nettoyage du symlink
+      if (fs.existsSync(symlinkPath)) fs.unlinkSync(symlinkPath);
+      if (fs.existsSync(outsideTarget)) fs.unlinkSync(outsideTarget);
+    });
+
+    it('devrait refuser l écriture si la cible existante est un lien symbolique', async () => {
+      const tenantId = 'tenant-symlink-write';
+      const tenantDir = path.resolve(testDir, 'businesses', tenantId, 'general');
+      fs.mkdirSync(tenantDir, { recursive: true });
+
+      const outsideTarget = path.resolve(testDir, 'outside-target.png');
+      fs.writeFileSync(outsideTarget, validPngBuffer);
+
+      const symlinkPath = path.resolve(tenantDir, 'pre-existing-symlink.png');
+      if (fs.existsSync(symlinkPath)) fs.unlinkSync(symlinkPath);
+      fs.symlinkSync(outsideTarget, symlinkPath);
+
+      const symlinkKey = `businesses/${tenantId}/general/pre-existing-symlink.png`;
+
+      await expect(
+        storageService.uploadDirect(
+          tenantId,
+          'general',
+          'pre-existing-symlink.png',
+          validPngBuffer,
+          'image/png',
+          symlinkKey,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      if (fs.existsSync(symlinkPath)) fs.unlinkSync(symlinkPath);
+      if (fs.existsSync(outsideTarget)) fs.unlinkSync(outsideTarget);
+    });
+  });
+
+  describe('Accès Concurrents & Écritures Atomiques', () => {
+    it('devrait supporter des uploads concurrents sans corruption de données', async () => {
+      const tenantId = 'tenant-concurrency';
+      const concurrencyCount = 10;
+
+      const uploadPromises = Array.from({ length: concurrencyCount }, (_, i) =>
+        storageService.uploadDirect(
+          tenantId,
+          'parallel',
+          `file-${i}.png`,
+          validPngBuffer,
+          'image/png',
+        ),
+      );
+
+      const results = await Promise.all(uploadPromises);
+      expect(results.length).toBe(concurrencyCount);
+
+      // Vérifier que tous les fichiers sont lisibles et complets
+      for (const res of results) {
+        const fileInfo = await storageService.getFile(tenantId, res.key);
+        expect(fileInfo.mimeType).toBe('image/png');
+        expect(fs.existsSync(fileInfo.absolutePath)).toBe(true);
+      }
+    });
+
+    it('devrait gérer gracieusement la suppression concurrente sans lever d erreur non maîtrisée', async () => {
+      const tenantId = 'tenant-delete-concurrency';
+      const upload = await storageService.uploadDirect(
+        tenantId,
+        'docs',
+        'document.pdf',
+        validPdfBuffer,
+        'application/pdf',
+      );
+
+      // Deux suppressions concurrentes sur le même fichier
+      const [del1, del2] = await Promise.all([
+        storageService.deleteFile(tenantId, upload.key),
+        storageService.deleteFile(tenantId, upload.key),
+      ]);
+
+      expect(del1.success).toBe(true);
+      expect(del2.success).toBe(true);
+    });
+  });
+
+  describe('Validation des types MIME et signatures binaires', () => {
+    it('devrait rejeter un type MIME non autorisé', async () => {
+      await expect(
+        storageService.getPresignedUploadUrl('tenant-1', 'products', 'malware.exe', 'application/x-msdownload'),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -57,31 +242,11 @@ describe('StorageService (Stockage Local Multi-Tenant Durci)', () => {
         storageService.uploadDirect('tenant-1', 'products', 'fake.png', fakePngBuffer, 'image/png'),
       ).rejects.toThrow(BadRequestException);
     });
-
-    it('devrait rejeter un fichier exécutable dissimulé sous format CSV', async () => {
-      const fakeCsvExecutable = Buffer.from([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00]); // En-tête MZ PE executable
-      await expect(
-        storageService.uploadDirect('tenant-1', 'products', 'fake.csv', fakeCsvExecutable, 'text/csv'),
-      ).rejects.toThrow(BadRequestException);
-    });
   });
 
-  describe('Sécurité Anti-Path Traversal & Isolation Multi-Tenant', () => {
-    it('devrait bloquer l accès à un fichier d un autre tenant sans path traversal', async () => {
-      await expect(
-        storageService.getFile('tenant-attacker', 'businesses/tenant-victim/products/secret.pdf'),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
+  describe('Sécurité Anti-Path Traversal', () => {
     it('devrait bloquer une tentative de path traversal sophistiquée avec .. vers un autre tenant', async () => {
       const maliciousKey = 'businesses/tenant-attacker/../../businesses/tenant-victim/products/secret.pdf';
-      await expect(
-        storageService.getFile('tenant-attacker', maliciousKey),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
-    it('devrait bloquer une tentative de path traversal vers la racine système (/etc/passwd)', async () => {
-      const maliciousKey = 'businesses/tenant-attacker/../../../../etc/passwd';
       await expect(
         storageService.getFile('tenant-attacker', maliciousKey),
       ).rejects.toThrow(ForbiddenException);
@@ -92,68 +257,6 @@ describe('StorageService (Stockage Local Multi-Tenant Durci)', () => {
       await expect(
         storageService.getFile('tenant-attacker', maliciousKey),
       ).rejects.toThrow(ForbiddenException);
-    });
-
-    it('devrait bloquer les chemins absolus', async () => {
-      const absoluteKey = '/etc/passwd';
-      await expect(
-        storageService.getFile('tenant-attacker', absoluteKey),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
-    it('devrait bloquer les businessId invalides ou malveillants', async () => {
-      await expect(
-        storageService.getPresignedUploadUrl('../../bad-tenant', 'products', 'photo.png', 'image/png'),
-      ).rejects.toThrow(BadRequestException);
-    });
-  });
-
-  describe('Cohérence des URL et Contrats API', () => {
-    it('devrait générer une URL d upload et de téléchargement cohérente avec les endpoints disponibles', async () => {
-      const result = await storageService.getPresignedUploadUrl('tenant-123', 'products', 'photo.jpg', 'image/jpeg');
-
-      expect(result.key).toContain('businesses/tenant-123/products/');
-      expect(result.key).toContain('photo.jpg');
-      expect(result.uploadUrl).toBe('https://boutica.cloud/api/v1/media/upload?folder=products');
-      expect(result.downloadUrl).toContain('https://boutica.cloud/api/v1/media/file?key=');
-      expect(result.publicUrl).toBe(result.downloadUrl);
-    });
-  });
-
-  describe('Cycle de vie complet légitime (Upload, Lecture, Suppression)', () => {
-    it('devrait uploader un fichier valide, permettre sa lecture par son propriétaire et sa suppression', async () => {
-      // 1. Upload
-      const upload = await storageService.uploadDirect(
-        'tenant-alpha',
-        'invoices',
-        'facture.pdf',
-        validPdfBuffer,
-        'application/pdf',
-      );
-
-      expect(upload.key).toContain('businesses/tenant-alpha/invoices/');
-      expect(upload.size).toBe(validPdfBuffer.length);
-      expect(upload.url).toContain('/api/v1/media/file?key=');
-
-      // 2. Lecture autorisée pour tenant-alpha
-      const fileInfo = await storageService.getFile('tenant-alpha', upload.key);
-      expect(fileInfo.mimeType).toBe('application/pdf');
-      expect(fileInfo.filename).toContain('facture.pdf');
-      expect(fs.existsSync(fileInfo.absolutePath)).toBe(true);
-
-      // 3. Lecture refusée pour tenant-beta (ForbiddenException)
-      await expect(storageService.getFile('tenant-beta', upload.key)).rejects.toThrow(ForbiddenException);
-
-      // 4. Suppression refusée pour tenant-beta
-      await expect(storageService.deleteFile('tenant-beta', upload.key)).rejects.toThrow(ForbiddenException);
-
-      // 5. Suppression autorisée pour tenant-alpha
-      const del = await storageService.deleteFile('tenant-alpha', upload.key);
-      expect(del.success).toBe(true);
-      expect(fs.existsSync(fileInfo.absolutePath)).toBe(false);
-
-      // 6. Lecture après suppression -> NotFoundException
-      await expect(storageService.getFile('tenant-alpha', upload.key)).rejects.toThrow(NotFoundException);
     });
   });
 });

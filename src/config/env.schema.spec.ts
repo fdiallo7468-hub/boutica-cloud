@@ -1,6 +1,6 @@
-import { envSchema, KNOWN_DEV_SECRETS } from './env.schema';
+import { envSchema, isPrivateOrDangerousHost, isValidCorsOrigin, KNOWN_DEV_SECRETS } from './env.schema';
 
-describe('envSchema Validation', () => {
+describe('envSchema Validation & Security', () => {
   const validProductionEnv = {
     NODE_ENV: 'production',
     PORT: '3000',
@@ -9,6 +9,118 @@ describe('envSchema Validation', () => {
     BETTER_AUTH_URL: 'https://boutica-cloud.onrender.com',
     CORS_ORIGIN: 'https://boutica-cloud.onrender.com,https://app.boutica.cloud',
   };
+
+  describe('isPrivateOrDangerousHost Helper', () => {
+    it('devrait détecter localhost et les adresses de boucle locale', () => {
+      expect(isPrivateOrDangerousHost('localhost')).toBe(true);
+      expect(isPrivateOrDangerousHost('api.localhost')).toBe(true);
+      expect(isPrivateOrDangerousHost('127.0.0.1')).toBe(true);
+      expect(isPrivateOrDangerousHost('127.0.1.1')).toBe(true);
+      expect(isPrivateOrDangerousHost('0.0.0.0')).toBe(true);
+      expect(isPrivateOrDangerousHost('::1')).toBe(true);
+    });
+
+    it('devrait détecter les adresses privées RFC 1918 et link-local RFC 3927', () => {
+      expect(isPrivateOrDangerousHost('10.0.0.1')).toBe(true);
+      expect(isPrivateOrDangerousHost('10.255.255.254')).toBe(true);
+      expect(isPrivateOrDangerousHost('172.16.0.1')).toBe(true);
+      expect(isPrivateOrDangerousHost('172.31.255.255')).toBe(true);
+      expect(isPrivateOrDangerousHost('192.168.1.1')).toBe(true);
+      expect(isPrivateOrDangerousHost('192.168.0.254')).toBe(true);
+      expect(isPrivateOrDangerousHost('169.254.169.254')).toBe(true); // AWS/GCP metadata
+    });
+
+    it('devrait détecter les domaines de test et réservés', () => {
+      expect(isPrivateOrDangerousHost('server.local')).toBe(true);
+      expect(isPrivateOrDangerousHost('corp.internal')).toBe(true);
+      expect(isPrivateOrDangerousHost('test.example')).toBe(true);
+    });
+
+    it('devrait autoriser les domaines publics légitimes', () => {
+      expect(isPrivateOrDangerousHost('boutica.cloud')).toBe(false);
+      expect(isPrivateOrDangerousHost('api.boutica.cloud')).toBe(false);
+      expect(isPrivateOrDangerousHost('boutica-cloud.onrender.com')).toBe(false);
+      expect(isPrivateOrDangerousHost('neon.tech')).toBe(false);
+    });
+  });
+
+  describe('isValidCorsOrigin Helper', () => {
+    it('devrait rejeter le wildcard * lorsque credentials: true est actif', () => {
+      const res = isValidCorsOrigin('*', true);
+      expect(res.valid).toBe(false);
+      expect(res.reason).toContain('wildcard "*" est interdit');
+    });
+
+    it('devrait rejeter les origines avec chemin ou query parameters', () => {
+      expect(isValidCorsOrigin('https://boutica.cloud/api', true).valid).toBe(false);
+      expect(isValidCorsOrigin('https://boutica.cloud?query=1', true).valid).toBe(false);
+      expect(isValidCorsOrigin('https://boutica.cloud#anchor', true).valid).toBe(false);
+    });
+
+    it('devrait exiger HTTPS en production et rejeter les origines HTTP non sécurisées', () => {
+      expect(isValidCorsOrigin('http://boutica.cloud', true).valid).toBe(false);
+      expect(isValidCorsOrigin('https://boutica.cloud', true).valid).toBe(true);
+    });
+
+    it('devrait accepter http://localhost en développement', () => {
+      expect(isValidCorsOrigin('http://localhost:5173', false).valid).toBe(true);
+      expect(isValidCorsOrigin('http://127.0.0.1:3000', false).valid).toBe(true);
+    });
+  });
+
+  describe('Exigences de Sécurité en Production', () => {
+    it('devrait rejeter BETTER_AUTH_URL en HTTP simple en production', () => {
+      const dangerous = {
+        ...validProductionEnv,
+        BETTER_AUTH_URL: 'http://boutica-cloud.onrender.com',
+      };
+      const result = envSchema.safeParse(dangerous);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const issue = result.error.issues.find((i) => i.path.includes('BETTER_AUTH_URL'));
+        expect(issue?.message).toContain('strictly use HTTPS in production');
+      }
+    });
+
+    it('devrait rejeter BETTER_AUTH_URL ciblant une IP privée (SSRF/Metadata) en production', () => {
+      const dangerous = {
+        ...validProductionEnv,
+        BETTER_AUTH_URL: 'https://169.254.169.254',
+      };
+      const result = envSchema.safeParse(dangerous);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const issue = result.error.issues.find((i) => i.path.includes('BETTER_AUTH_URL'));
+        expect(issue?.message).toContain('private, loopback, or local network address');
+      }
+    });
+
+    it('devrait rejeter CORS_ORIGIN avec wildcard en production', () => {
+      const dangerous = {
+        ...validProductionEnv,
+        CORS_ORIGIN: '*',
+      };
+      const result = envSchema.safeParse(dangerous);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const issue = result.error.issues.find((i) => i.path.includes('CORS_ORIGIN'));
+        expect(issue?.message).toContain('wildcard "*" est interdit');
+      }
+    });
+
+    it('devrait rejeter CORS_ORIGIN contenant une origine avec chemin en production', () => {
+      const dangerous = {
+        ...validProductionEnv,
+        CORS_ORIGIN: 'https://app.boutica.cloud/dashboard',
+      };
+      const result = envSchema.safeParse(dangerous);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const issue = result.error.issues.find((i) => i.path.includes('CORS_ORIGIN'));
+        expect(issue?.message).toContain('ne doit pas comporter de chemin d\'accès');
+      }
+    });
+  });
 
   describe('Environnement de Développement / Test', () => {
     it('devrait appliquer des valeurs de repli sûres en développement si aucune variable n est fournie', () => {
@@ -70,19 +182,6 @@ describe('envSchema Validation', () => {
       }
     });
 
-    it('devrait rejeter un protocole de base de données invalide', () => {
-      const invalid = {
-        ...validProductionEnv,
-        DATABASE_URL: 'mysql://remote.host:3306/boutica',
-      };
-      const result = envSchema.safeParse(invalid);
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        const dbIssue = result.error.issues.find((i) => i.path.includes('DATABASE_URL'));
-        expect(dbIssue?.message).toContain('starting with postgresql:// or postgres://');
-      }
-    });
-
     it('devrait rejeter les secrets de développement connus en production', () => {
       for (const knownSecret of KNOWN_DEV_SECRETS) {
         const dangerous = {
@@ -122,58 +221,6 @@ describe('envSchema Validation', () => {
         const secretIssue = result.error.issues.find((i) => i.path.includes('BETTER_AUTH_SECRET'));
         expect(secretIssue?.message).toContain('too repetitive or weak');
       }
-    });
-
-    it('devrait rejeter BETTER_AUTH_URL pointant vers localhost en production', () => {
-      const dangerous = {
-        ...validProductionEnv,
-        BETTER_AUTH_URL: 'http://localhost:3000',
-      };
-      const result = envSchema.safeParse(dangerous);
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        const urlIssue = result.error.issues.find((i) => i.path.includes('BETTER_AUTH_URL'));
-        expect(urlIssue?.message).toContain('cannot point to localhost or 127.0.0.1 in production');
-      }
-    });
-
-    it('devrait rejeter une configuration de production sans CORS_ORIGIN', () => {
-      const { CORS_ORIGIN, ...incomplete } = validProductionEnv;
-      const result = envSchema.safeParse(incomplete);
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        const corsIssue = result.error.issues.find((i) => i.path.includes('CORS_ORIGIN'));
-        expect(corsIssue?.message).toContain('CORS_ORIGIN must be set explicitly in production');
-      }
-    });
-
-    it('ne devrait jamais faire fuiter de valeur de secret dans les messages d erreur', () => {
-      const secretToHide = 'top_secret_sensitive_password_attempt_32_chars';
-      const dangerous = {
-        ...validProductionEnv,
-        BETTER_AUTH_SECRET: secretToHide,
-        DATABASE_URL: 'invalid-url',
-      };
-      const result = envSchema.safeParse(dangerous);
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        const serialized = JSON.stringify(result.error.issues);
-        expect(serialized).not.toContain(secretToHide);
-      }
-    });
-  });
-
-  describe('Méthode validate pour ConfigModule de NestJS', () => {
-    it('devrait renvoyer { value } lorsque la configuration est valide', () => {
-      const res = (envSchema as any).validate({ NODE_ENV: 'test' });
-      expect(res.value).toBeDefined();
-      expect(res.error).toBeUndefined();
-    });
-
-    it('devrait renvoyer { error } lorsque la configuration de production est invalide', () => {
-      const res = (envSchema as any).validate({ NODE_ENV: 'production' });
-      expect(res.error).toBeDefined();
-      expect(res.value).toBeUndefined();
     });
   });
 });

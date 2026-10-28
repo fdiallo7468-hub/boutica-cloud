@@ -39,14 +39,15 @@ const BUSINESS_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
 const FOLDER_REGEX = /^[a-zA-Z0-9_-]+$/;
 
 /**
- * StorageService — Stockage local multi-tenant durci et sécurisé
+ * StorageService — Stockage local multi-tenant durci, atomique et sécurisé
  * 
- * Garantit :
- * 1. Une isolation multi-tenant stricte basée sur path.relative() (aucun accès interentreprises).
- * 2. Une protection absolue contre les traversées de chemin (path traversal, .., segments absolus).
- * 3. Une validation stricte des signatures binaires (magic bytes) pour empêcher le spoofing d'extension.
- * 4. Une cohérence parfaite des URL d'upload et de téléchargement.
- * 5. Une gestion propre des erreurs de système de fichiers.
+ * Garanties de sécurité :
+ * 1. Cohérence stricte du contrat d'upload : la clé réservée par getPresignedUploadUrl
+ *    est respectée par uploadDirect(..., expectedKey).
+ * 2. Isolation multi-tenant étanche avec path.relative() et path.posix.normalize().
+ * 3. Protection absolue contre les liens symboliques (symlinks) via fs.lstat et fs.realpath.
+ * 4. Protection contre les accès concurrents : écritures atomiques (fichier temporaire + rename POSIX).
+ * 5. Validation binaire stricte (magic bytes) et validation UTF-8 irréprochable pour les fichiers CSV.
  */
 @Injectable()
 export class StorageService {
@@ -135,7 +136,6 @@ export class StorageService {
       throw new BadRequestException('Clé de fichier requise');
     }
 
-    // Décodage si la clé a été URL-encodée
     let decodedKey = key;
     try {
       decodedKey = decodeURIComponent(key);
@@ -143,7 +143,7 @@ export class StorageService {
       throw new BadRequestException('Clé de fichier malformée');
     }
 
-    // Rejet immédiat des caractères dangereux et tentatives de traversée évidentes
+    // Rejet immédiat des caractères dangereux et tentatives de traversée
     if (
       decodedKey.includes('\0') ||
       decodedKey.includes('\\') ||
@@ -154,10 +154,8 @@ export class StorageService {
       throw new ForbiddenException('Tentative de traversée de chemin non autorisée');
     }
 
-    // Normalisation POSIX stricte
     const normalizedKey = path.posix.normalize(decodedKey);
 
-    // Vérification de sécurité post-normalisation
     if (
       normalizedKey.startsWith('/') ||
       normalizedKey.startsWith('../') ||
@@ -167,18 +165,15 @@ export class StorageService {
       throw new ForbiddenException('Tentative de traversée de chemin non autorisée');
     }
 
-    // Vérification que la clé normalisée commence strictement par le préfixe du tenant
     const expectedPrefix = `businesses/${businessId}/`;
     if (!normalizedKey.startsWith(expectedPrefix)) {
       throw new ForbiddenException(`Accès refusé : la ressource n'appartient pas à votre entreprise`);
     }
 
-    // Résolution absolue
     const fullPath = path.resolve(this.baseDir, normalizedKey);
     const tenantBaseDir = path.resolve(this.baseDir, 'businesses', businessId);
     const resolvedBase = path.resolve(this.baseDir);
 
-    // Vérification rigoureuse avec path.relative()
     const relToTenant = path.relative(tenantBaseDir, fullPath);
     if (relToTenant.startsWith('..') || path.isAbsolute(relToTenant)) {
       throw new ForbiddenException(`Accès refusé : fichier hors du périmètre de votre entreprise`);
@@ -217,7 +212,7 @@ export class StorageService {
   }
 
   /**
-   * Vérifie la signature réelle (magic bytes) du buffer binaire.
+   * Vérifie la signature réelle (magic bytes) et l'intégrité du contenu pour le type déclaré.
    */
   validateFileSignature(buffer: Buffer, declaredMimeType: string): void {
     if (!buffer || buffer.length === 0) {
@@ -226,14 +221,12 @@ export class StorageService {
 
     switch (declaredMimeType) {
       case 'image/jpeg': {
-        // JPEG commence par FF D8 FF
         if (buffer.length < 3 || buffer[0] !== 0xff || buffer[1] !== 0xd8 || buffer[2] !== 0xff) {
           throw new BadRequestException('La signature binaire du fichier ne correspond pas au format JPEG');
         }
         break;
       }
       case 'image/png': {
-        // PNG commence par 89 50 4E 47 0D 0A 1A 0A
         const pngHeader = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
         if (buffer.length < 8 || !pngHeader.every((byte, idx) => buffer[idx] === byte)) {
           throw new BadRequestException('La signature binaire du fichier ne correspond pas au format PNG');
@@ -241,7 +234,6 @@ export class StorageService {
         break;
       }
       case 'image/gif': {
-        // GIF commence par GIF87a ou GIF89a
         const header = buffer.toString('ascii', 0, 6);
         if (header !== 'GIF87a' && header !== 'GIF89a') {
           throw new BadRequestException('La signature binaire du fichier ne correspond pas au format GIF');
@@ -249,7 +241,6 @@ export class StorageService {
         break;
       }
       case 'image/webp': {
-        // WEBP commence par RIFF à 0 et WEBP à 8
         if (buffer.length < 12) {
           throw new BadRequestException('Fichier WEBP trop court ou corrompu');
         }
@@ -261,7 +252,6 @@ export class StorageService {
         break;
       }
       case 'application/pdf': {
-        // PDF commence par %PDF-
         const header = buffer.toString('ascii', 0, 5);
         if (header !== '%PDF-') {
           throw new BadRequestException('La signature binaire du fichier ne correspond pas au format PDF');
@@ -269,16 +259,35 @@ export class StorageService {
         break;
       }
       case 'text/csv': {
-        // Rejette les exécutables (MZ / ELF) et les octets de contrôle binaires nuls
-        if (buffer.length >= 2 && buffer[0] === 0x4d && buffer[1] === 0x5a) {
-          throw new BadRequestException('Fichier binaire/exécutable non autorisé comme document CSV');
+        // 1. Décodage UTF-8 strict (fatal: true rejette les séquences d'octets invalides)
+        let textContent: string;
+        try {
+          const decoder = new TextDecoder('utf-8', { fatal: true });
+          textContent = decoder.decode(buffer);
+        } catch {
+          throw new BadRequestException('Le fichier CSV n\'est pas un document encodé en UTF-8 valide');
         }
-        // Vérifie les premiers 512 octets pour détecter d'éventuels octets binaires nuls
-        const sampleSize = Math.min(buffer.length, 512);
-        for (let i = 0; i < sampleSize; i++) {
-          if (buffer[i] === 0x00) {
-            throw new BadRequestException('Fichier binaire non autorisé comme document CSV');
+
+        // 2. Rejet des exécutables (MZ Windows, ELF Linux, Mach-O macOS)
+        if (buffer.length >= 2 && buffer[0] === 0x4d && buffer[1] === 0x5a) {
+          throw new BadRequestException('Fichier binaire/exécutable MZ non autorisé comme document CSV');
+        }
+        if (buffer.length >= 4 && buffer[0] === 0x7f && buffer[1] === 0x45 && buffer[2] === 0x4c && buffer[3] === 0x46) {
+          throw new BadRequestException('Fichier binaire ELF non autorisé comme document CSV');
+        }
+
+        // 3. Rejet des octets de contrôle binaires non textuels sur l'intégralité du contenu
+        // Seuls \t (0x09), \n (0x0A), \r (0x0D) et les octets >= 0x20 sont autorisés
+        for (let i = 0; i < buffer.length; i++) {
+          const byte = buffer[i]!;
+          if (byte < 0x20 && byte !== 0x09 && byte !== 0x0a && byte !== 0x0d) {
+            throw new BadRequestException('Le fichier CSV contient des octets de contrôle binaires non autorisés');
           }
+        }
+
+        // 4. Vérification d'un contenu minimal non vide
+        if (textContent.trim().length === 0) {
+          throw new BadRequestException('Le fichier CSV ne contient aucun contenu textuel imprimable');
         }
         break;
       }
@@ -287,6 +296,11 @@ export class StorageService {
     }
   }
 
+  /**
+   * Génère une URL d'upload pré-signée et réserve la clé correspondante.
+   * L'URL d'upload générée inclut la clé réservée (ex: /api/v1/media/upload?key=...)
+   * garantissant un contrat cohérent entre l'annonce et l'upload effectif.
+   */
   async getPresignedUploadUrl(
     businessId: string,
     folder = 'products',
@@ -303,9 +317,9 @@ export class StorageService {
     const cleanFolder = this.validateFolder(folder);
     const key = this.buildKey(businessId, cleanFolder, filename);
 
-    // URL cohérente : transmet le dossier dans la query string pour pré-remplir l'upload
+    // Contrat d'upload cohérent : transmet la clé réservée dans l'uploadUrl
     const baseEndpoint = this.publicBaseUrl ? `${this.publicBaseUrl}/api/v1/media` : '/api/v1/media';
-    const uploadUrl = `${baseEndpoint}/upload?folder=${encodeURIComponent(cleanFolder)}`;
+    const uploadUrl = `${baseEndpoint}/upload?key=${encodeURIComponent(key)}`;
     const downloadUrl = this.buildFileUrl(key);
 
     return {
@@ -316,20 +330,33 @@ export class StorageService {
     };
   }
 
+  /**
+   * Upload direct avec écriture atomique et protection anti-liens symboliques.
+   * Si expectedKey est fourni (réservation préalable), il est validé et réutilisé.
+   */
   async uploadDirect(
     businessId: string,
     folder: string,
     filename: string,
     buffer: Buffer,
     mimeType: string,
-  ): Promise<{ key: string; url: string; size: number }> {
+    expectedKey?: string,
+  ): Promise<{ key: string; url: string; downloadUrl: string; publicUrl: string; size: number }> {
     this.validateBusinessId(businessId);
     this.validateMimeType(mimeType);
     this.validateFileSize(buffer.length);
     this.validateFileSignature(buffer, mimeType);
 
-    const cleanFolder = this.validateFolder(folder);
-    const key = this.buildKey(businessId, cleanFolder, filename);
+    let key: string;
+    if (expectedKey && typeof expectedKey === 'string' && expectedKey.trim() !== '') {
+      // Validation stricte que la clé fournie appartient bien à ce tenant
+      this.resolveSafeFilePath(businessId, expectedKey.trim());
+      key = expectedKey.trim();
+    } else {
+      const cleanFolder = this.validateFolder(folder);
+      key = this.buildKey(businessId, cleanFolder, filename);
+    }
+
     const filePath = this.resolveSafeFilePath(businessId, key);
     const dir = path.dirname(filePath);
 
@@ -337,23 +364,53 @@ export class StorageService {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      await fs.promises.writeFile(filePath, buffer);
+
+      // Vérification anti-symlink sur le dossier parent
+      const dirLstat = await fs.promises.lstat(dir);
+      if (dirLstat.isSymbolicLink()) {
+        throw new ForbiddenException('Le dossier de destination est un lien symbolique non autorisé');
+      }
+
+      // Si le fichier existe déjà, vérifier qu'il ne s'agit pas d'un lien symbolique
+      if (fs.existsSync(filePath)) {
+        const fileLstat = await fs.promises.lstat(filePath);
+        if (fileLstat.isSymbolicLink()) {
+          throw new ForbiddenException('Écriture interdite sur un lien symbolique existant');
+        }
+      }
+
+      // Écriture atomique : écriture dans un fichier temporaire unique puis renommage atomique POSIX
+      const tempFilePath = `${filePath}.${randomUUID()}.tmp`;
+      try {
+        await fs.promises.writeFile(tempFilePath, buffer);
+        await fs.promises.rename(tempFilePath, filePath);
+      } finally {
+        // Nettoyage sécurisé du temporaire s'il subsiste
+        if (fs.existsSync(tempFilePath)) {
+          await fs.promises.unlink(tempFilePath).catch(() => {});
+        }
+      }
     } catch (err: any) {
+      if (err instanceof ForbiddenException || err instanceof BadRequestException) {
+        throw err;
+      }
       this.logger.error(`Erreur d'écriture sur le disque local pour '${key}': ${err.message}`);
       throw new InternalServerErrorException('Erreur lors de l’écriture du fichier sur le stockage');
     }
 
     this.logger.log(`Média enregistré avec succès : ${key} (${buffer.length} octets)`);
+    const fileUrl = this.buildFileUrl(key);
 
     return {
       key,
-      url: this.buildFileUrl(key),
+      url: fileUrl,
+      downloadUrl: fileUrl,
+      publicUrl: fileUrl,
       size: buffer.length,
     };
   }
 
   async getPresignedDownloadUrl(businessId: string, key: string): Promise<string> {
-    // Valide le tenant et la conformité du chemin
     this.resolveSafeFilePath(businessId, key);
     return this.buildFileUrl(key);
   }
@@ -368,13 +425,27 @@ export class StorageService {
       throw new NotFoundException(`Le fichier '${key}' est introuvable sur le serveur`);
     }
 
-    const ext = this.getExtension(filePath);
+    // Vérification stricte anti-lien symbolique
+    const lstats = await fs.promises.lstat(filePath);
+    if (lstats.isSymbolicLink()) {
+      throw new ForbiddenException('Accès refusé : les liens symboliques sont strictement interdits');
+    }
+
+    // Vérification que le chemin réel canonique ne pointe pas hors du tenant
+    const realFilePath = await fs.promises.realpath(filePath);
+    const tenantBaseDir = path.resolve(this.baseDir, 'businesses', businessId);
+    const relToTenant = path.relative(tenantBaseDir, realFilePath);
+    if (relToTenant.startsWith('..') || path.isAbsolute(relToTenant)) {
+      throw new ForbiddenException('Accès refusé : la cible résolue est hors du périmètre de l’entreprise');
+    }
+
+    const ext = this.getExtension(realFilePath);
     const mimeType = MIME_EXTENSION_MAP[ext] || 'application/octet-stream';
 
     return {
-      absolutePath: filePath,
+      absolutePath: realFilePath,
       mimeType,
-      filename: path.basename(filePath),
+      filename: path.basename(realFilePath),
     };
   }
 
@@ -383,9 +454,20 @@ export class StorageService {
 
     if (fs.existsSync(filePath)) {
       try {
+        const lstats = await fs.promises.lstat(filePath);
+        if (lstats.isSymbolicLink()) {
+          // Suppression sécurisée du lien sans suivre la cible
+          await fs.promises.unlink(filePath);
+          this.logger.warn(`Lien symbolique détecté et supprimé : ${key}`);
+          return { success: true };
+        }
         await fs.promises.unlink(filePath);
         this.logger.log(`Fichier média supprimé : ${key}`);
       } catch (err: any) {
+        // Tolérance pour suppression concurrente (si déjà supprimé par un thread concurrent)
+        if (err.code === 'ENOENT') {
+          return { success: true };
+        }
         this.logger.error(`Erreur lors de la suppression de '${key}': ${err.message}`);
         throw new InternalServerErrorException('Erreur lors de la suppression du fichier');
       }

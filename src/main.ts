@@ -55,8 +55,27 @@ async function bootstrap() {
   // guarantees CORS_ORIGIN is set once NODE_ENV=production — the app would
   // not have reached this line otherwise — so this is just parsing, not
   // re-enforcing the policy.
-  const corsOrigin = config.get('CORS_ORIGIN', { infer: true })?.split(',').map((o) => o.trim());
-  app.enableCors({ origin: corsOrigin ?? ['http://localhost:5173'], credentials: true });
+  const corsOriginRaw = config.get('CORS_ORIGIN', { infer: true });
+  const corsOrigins = corsOriginRaw
+    ? corsOriginRaw.split(',').map((o) => o.trim()).filter(Boolean)
+    : ['http://localhost:5173', 'http://localhost:3000'];
+
+  app.enableCors({
+    origin: (requestOrigin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      // Autoriser les requêtes sans en-tête Origin (ex: clients mobiles natifs, desktop, server-to-server)
+      if (!requestOrigin) {
+        return callback(null, true);
+      }
+      if (corsOrigins.includes(requestOrigin)) {
+        return callback(null, true);
+      }
+      logger.warn(`Requête CORS bloquée pour l\x27origine non autorisée : ${requestOrigin}`);
+      return callback(new Error(`CORS policy: origin ${requestOrigin} not allowed`), false);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Idempotency-Key'],
+  });
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Boutica API')
