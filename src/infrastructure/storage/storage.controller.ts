@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -10,12 +11,12 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { CurrentTenant } from '../../modules/auth/current-tenant.decorator';
 import { Tenant } from '../../modules/auth/tenant.type';
 import { GetPresignedUrlDto } from './dto/get-presigned-url.dto';
-import { StorageService } from './storage.service';
+import { MAX_FILE_SIZE_BYTES, StorageService } from './storage.service';
 
 @ApiTags('media')
 @ApiBearerAuth()
@@ -40,6 +41,7 @@ export class StorageController {
 
   @ApiOperation({ summary: 'Uploader directement un fichier média (images produits, documents)' })
   @ApiConsumes('multipart/form-data')
+  @ApiQuery({ name: 'folder', required: false, description: 'Dossier de destination (ex: products, invoices)' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -50,15 +52,29 @@ export class StorageController {
     },
   })
   @Post('upload')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: MAX_FILE_SIZE_BYTES,
+        files: 1,
+      },
+    }),
+  )
   async uploadFile(
     @CurrentTenant() tenant: Tenant,
-    @UploadedFile() file: Express.Multer.File,
-    @Body('folder') folder?: string,
+    @UploadedFile() file?: Express.Multer.File,
+    @Body('folder') bodyFolder?: string,
+    @Query('folder') queryFolder?: string,
   ) {
+    if (!file || !file.buffer || file.buffer.length === 0) {
+      throw new BadRequestException('Aucun fichier fourni dans la requête (champ "file" requis)');
+    }
+
+    const folder = (bodyFolder || queryFolder || 'products').trim();
+
     return this.storageService.uploadDirect(
       tenant.businessId,
-      folder || 'products',
+      folder,
       file.originalname,
       file.buffer,
       file.mimetype,
@@ -71,8 +87,11 @@ export class StorageController {
     @CurrentTenant() tenant: Tenant,
     @Query('key') key: string,
   ) {
-    const url = await this.storageService.getPresignedDownloadUrl(tenant.businessId, key);
-    return { key, url };
+    if (!key || typeof key !== 'string' || key.trim() === '') {
+      throw new BadRequestException('Paramètre "key" manquant ou invalide');
+    }
+    const url = await this.storageService.getPresignedDownloadUrl(tenant.businessId, key.trim());
+    return { key: key.trim(), url };
   }
 
   @ApiOperation({ summary: 'Télécharger ou afficher directement un fichier média stocké' })
@@ -82,9 +101,13 @@ export class StorageController {
     @Query('key') key: string,
     @Res() res: Response,
   ) {
-    const fileInfo = await this.storageService.getFile(tenant.businessId, key);
+    if (!key || typeof key !== 'string' || key.trim() === '') {
+      throw new BadRequestException('Paramètre "key" manquant ou invalide');
+    }
+    const fileInfo = await this.storageService.getFile(tenant.businessId, key.trim());
     res.setHeader('Content-Type', fileInfo.mimeType);
-    res.setHeader('Content-Disposition', `inline; filename="${fileInfo.filename}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileInfo.filename)}"`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.sendFile(fileInfo.absolutePath);
   }
 
@@ -94,6 +117,9 @@ export class StorageController {
     @CurrentTenant() tenant: Tenant,
     @Query('key') key: string,
   ) {
-    return this.storageService.deleteFile(tenant.businessId, key);
+    if (!key || typeof key !== 'string' || key.trim() === '') {
+      throw new BadRequestException('Paramètre "key" manquant ou invalide');
+    }
+    return this.storageService.deleteFile(tenant.businessId, key.trim());
   }
 }
