@@ -1,3 +1,5 @@
+import { toNodeHandler } from "better-auth/node";
+import { auth } from "./auth/auth";
 import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
@@ -19,6 +21,15 @@ async function bootstrap() {
   // this exact ordering requirement.
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   const logger = new Logger('Bootstrap');
+
+  const expressApp = app.getHttpAdapter().getInstance();
+  // 1. Confiance au proxy inverse Render (HTTPS, en-têtes x-forwarded-proto)
+  expressApp.set('trust proxy', 1);
+
+  // 2. Gestionnaire Better Auth natif direct : préserve l\x27intégralité du chemin et des paramètres de requête (query params)
+  expressApp.use('/api/auth', (req: any, res: any) => {
+    return toNodeHandler(auth)(req, res);
+  });
   // ROUND 2 FIX: env vars used to be read raw off process.env here, with a
   // manual fail-closed check duplicated just for CORS_ORIGIN. Everything
   // this file needs is now validated once, centrally, in
