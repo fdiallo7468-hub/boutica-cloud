@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import { StorageService } from './storage.service';
@@ -10,7 +10,6 @@ describe('StorageService (Stockage Local Multi-Tenant Durci)', () => {
   const validPngBuffer = Buffer.from([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
   ]);
-  const validJpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
   const validPdfBuffer = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF');
   const validCsvBuffer = Buffer.from('sku,name,price\nSKU-001,Produit Test,1500\nSKU-002,Produit Épice,2500\n');
 
@@ -123,7 +122,10 @@ describe('StorageService (Stockage Local Multi-Tenant Durci)', () => {
     });
   });
 
-  describe('Protection Anti-Liens Symboliques (Symlinks)', () => {
+  // Creating symlinks requires elevated Windows privileges; keep these security tests active on Unix.
+  const describeSymlinkTests = process.platform === 'win32' ? describe.skip : describe;
+
+  describeSymlinkTests('Protection Anti-Liens Symboliques (Symlinks)', () => {
     it('devrait refuser la lecture d un fichier qui est un lien symbolique vers un fichier sensible', async () => {
       const tenantId = 'tenant-symlink';
       const tenantDir = path.resolve(testDir, 'businesses', tenantId, 'general');

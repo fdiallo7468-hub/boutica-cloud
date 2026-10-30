@@ -20,6 +20,17 @@ import { accounts, businesses, sessions, users, verifications } from "../infrast
  */
 const env = envSchema.parse(process.env);
 const useSsl = env.DATABASE_URL.includes("sslmode=require") || env.NODE_ENV === "production";
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character]!);
+}
+
 const pool = new Pool({
   connectionString: env.DATABASE_URL,
   max: 5,
@@ -97,11 +108,11 @@ export const auth = betterAuth({
               html: `
                 <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
                   <h2 style="color: #0f172a; margin-bottom: 16px;">Réinitialisation de votre mot de passe</h2>
-                  <p>Bonjour ${user.name || ""},</p>
+                  <p>Bonjour ${escapeHtml(user.name || "")},</p>
                   <p>Une demande de réinitialisation de mot de passe a été initiée pour votre compte Boutica Cloud.</p>
                   <p>Ce lien est à usage unique et reste valide pendant <strong>1 heure</strong> :</p>
                   <div style="margin: 28px 0;">
-                    <a href="${resetLink}" style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block;">
+                    <a href="${escapeHtml(resetLink)}" style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block;">
                       Réinitialiser mon mot de passe
                     </a>
                   </div>
@@ -122,7 +133,7 @@ export const auth = betterAuth({
           console.error("[Auth/Resend] Erreur de communication avec l'API Resend:", err);
         }
       } else {
-        console.log(`[Auth/Resend] Simulation d'envoi (RESEND_API_KEY absent) pour ${user.email} -> ${resetLink}`);
+        console.warn("[Auth/Resend] E-mail de réinitialisation non envoyé : RESEND_API_KEY absent.");
       }
     },
   },

@@ -159,7 +159,7 @@ describe('envSchema Validation & Security', () => {
 
   describe('Rejet des Configurations de Production Dangereuses ou Incomplètes', () => {
     it('devrait rejeter une configuration de production sans DATABASE_URL', () => {
-      const { DATABASE_URL, ...incomplete } = validProductionEnv;
+      const { DATABASE_URL: _databaseUrl, ...incomplete } = validProductionEnv;
       const result = envSchema.safeParse(incomplete);
       expect(result.success).toBe(false);
       if (!result.success) {

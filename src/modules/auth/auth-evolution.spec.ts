@@ -8,7 +8,7 @@ jest.mock("../../auth/auth", () => ({
 jest.mock("better-auth/node", () => ({
   fromNodeHeaders: jest.fn().mockReturnValue({}),
 }));
-import { BadRequestException, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException } from "@nestjs/common";
 import { OnboardingController } from "./onboarding.controller";
 import { CompleteBusinessOnboardingDto } from "./onboarding.dto";
 

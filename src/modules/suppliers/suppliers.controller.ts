@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { and, count, eq } from 'drizzle-orm';
+import { count, eq } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
 import { suppliers } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';

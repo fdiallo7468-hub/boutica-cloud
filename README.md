@@ -118,6 +118,14 @@ Signing up creates a business AND its OWNER user in one call — `businessName`
 email/password sign-up. `POST /api/auth/sign-in/email` with `{email,
 password}` logs an existing user back in the same way.
 
+**Password reset:** the mobile app calls `POST /api/auth/request-password-reset`
+with the account email and the hosted reset-page URL. Better Auth emails a
+single-use link that expires after one hour. The page at `/reset-password`
+submits the new password to `POST /api/auth/reset-password`; the new password
+must contain at least 10 characters. Configure `RESEND_API_KEY` and a verified
+`EMAIL_FROM` address in the production environment for email delivery. Keep
+`RESET_PASSWORD_URL` pointed at the backend's `/reset-password` page.
+
 The returned `token` is a Better Auth session token, sent as a normal
 bearer token (`Authorization: Bearer <token>`) — this is what the brief's
 "JWT for mobile/API" requirement resolves to: one session-based system
@@ -238,5 +246,4 @@ Store/Business — see AUDIT_REPORT.md section D for how each is modeled, and
    - `BETTER_AUTH_URL` : URL publique Render (ex: `https://votre-app.onrender.com`)
    - `NODE_ENV` : `production`
    - `CORS_ORIGIN` : Origine autorisée du client (ex: `http://localhost:3000` en dév, ou URL de prod)
-
 
