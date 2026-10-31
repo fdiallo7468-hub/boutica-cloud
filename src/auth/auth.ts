@@ -31,6 +31,31 @@ function escapeHtml(value: string): string {
   })[character]!);
 }
 
+async function sendAuthEmail(to: string, subject: string, html: string): Promise<void> {
+  if (!env.RESEND_API_KEY) {
+    throw new Error("[Auth/Resend] RESEND_API_KEY absent : l'e-mail de vérification ne peut pas être envoyé.");
+  }
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: env.EMAIL_FROM,
+      to: [to],
+      subject,
+      html,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`[Auth/Resend] Échec d'envoi de l'e-mail de vérification : ${error}`);
+  }
+}
+
 const pool = new Pool({
   connectionString: env.DATABASE_URL,
   max: 5,
@@ -41,7 +66,10 @@ const db = drizzle(pool, { schema: { users, sessions, accounts, verifications, b
 export const auth = betterAuth({
   secret: env.BETTER_AUTH_SECRET,
   baseURL: env.BETTER_AUTH_URL,
-  trustedOrigins: env.CORS_ORIGIN?.split(",").map((o) => o.trim()),
+  trustedOrigins: [
+    ...(env.CORS_ORIGIN?.split(",").map((o) => o.trim()).filter(Boolean) ?? []),
+    "bouticaandroid://settings",
+  ],
 
   database: drizzleAdapter(db, {
     provider: "pg",
@@ -138,7 +166,56 @@ export const auth = betterAuth({
     },
   },
 
+  emailVerification: {
+    sendVerificationEmail: async ({ user, url }) => {
+      await sendAuthEmail(
+        user.email,
+        "Vérifiez votre adresse e-mail Boutica",
+        `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
+            <h2 style="color: #0f172a; margin-bottom: 16px;">Vérification de votre adresse e-mail</h2>
+            <p>Bonjour ${escapeHtml(user.name || "")},</p>
+            <p>Confirmez que vous avez accès à cette adresse afin de pouvoir modifier l'e-mail de votre compte Boutica.</p>
+            <div style="margin: 28px 0;">
+              <a href="${escapeHtml(url)}" style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block;">
+                Vérifier mon adresse e-mail
+              </a>
+            </div>
+            <p style="color: #64748b; font-size: 13px; line-height: 1.5;">
+              Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail.
+            </p>
+          </div>
+        `,
+      );
+    },
+  },
+
   user: {
+    changeEmail: {
+      enabled: true,
+      sendChangeEmailVerification: async ({ user, newEmail, url }) => {
+        await sendAuthEmail(
+          newEmail,
+          "Confirmez votre nouvelle adresse e-mail Boutica",
+          `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
+              <h2 style="color: #0f172a; margin-bottom: 16px;">Confirmez votre nouvelle adresse e-mail</h2>
+              <p>Bonjour ${escapeHtml(user.name || "")},</p>
+              <p>Une demande de changement d'adresse e-mail a été faite pour votre compte Boutica.</p>
+              <p>Votre adresse actuelle restera inchangée jusqu'à la confirmation de cette nouvelle adresse.</p>
+              <div style="margin: 28px 0;">
+                <a href="${escapeHtml(url)}" style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block;">
+                  Confirmer ma nouvelle adresse
+                </a>
+              </div>
+              <p style="color: #64748b; font-size: 13px; line-height: 1.5;">
+                Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail. Votre adresse ne sera pas modifiée.
+              </p>
+            </div>
+          `,
+        );
+      },
+    },
     additionalFields: {
       businessId: {
         type: "string",
