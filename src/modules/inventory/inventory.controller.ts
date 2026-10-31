@@ -5,12 +5,18 @@ import { DatabaseService } from '../../infrastructure/database/database';
 import { stock, stockMovements, variants } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { Tenant } from '../auth/tenant.type';
+import { PushNotificationsService } from '../notifications/push-notifications.service';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
+
+const LOW_STOCK_THRESHOLD = 5;
 
 @ApiTags('inventory')
 @Controller('api/v1/inventory')
 export class InventoryController {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly pushNotifications: PushNotificationsService,
+  ) {}
 
   @Get(':variantId')
   async get(@CurrentTenant() tenant: Tenant, @Param('variantId', ParseUUIDPipe) variantId: string) {
@@ -30,7 +36,7 @@ export class InventoryController {
 
   @Post(':variantId/adjust')
   async adjust(@CurrentTenant() tenant: Tenant, @Param('variantId', ParseUUIDPipe) variantId: string, @Body() body: AdjustStockDto) {
-    return this.db.db.transaction(async (tx) => {
+    const result = await this.db.db.transaction(async (tx) => {
       const [variant] = await tx
         .select({ id: variants.id })
         .from(variants)
@@ -63,7 +69,18 @@ export class InventoryController {
         });
       }
 
-      return updated;
+      return {
+        stock: updated,
+        crossedLowStockThreshold:
+          (!current || previousQuantity > LOW_STOCK_THRESHOLD)
+          && body.quantity <= LOW_STOCK_THRESHOLD,
+      };
     });
+
+    if (result.crossedLowStockThreshold) {
+      void this.pushNotifications.notifyLowStock(tenant.businessId);
+    }
+
+    return result.stock;
   }
 }

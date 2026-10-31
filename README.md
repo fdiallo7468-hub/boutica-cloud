@@ -148,6 +148,21 @@ two. This only matters for a browser client (Next.js) sending cookies; it's
 a no-op for bearer-token clients (Kotlin, React Native/Expo, Electron), which
 never send cookies at all.
 
+## Push notifications
+
+Authenticated devices register at `POST /api/v1/notifications/devices` and
+remove themselves at `DELETE /api/v1/notifications/devices`. The API sends
+Expo Push notifications for completed sales and when an inventory adjustment
+or sale lowers stock to five units or less. Device registrations are stored
+in the `push_devices` table added by migration
+`drizzle/0002_cloudy_scarlet_spider.sql`.
+
+Apply the migration to the deployed database before deploying this API
+version. First confirm that the database's Drizzle migration history matches
+the existing schema; do not replay the full migration chain against a
+database created with `db:push`. Back up production data and use the correct
+Neon branch before running migrations.
+
 ## Idempotency
 
 `POST /api/v1/sales`, `POST /api/v1/purchases/receive`, and `POST
@@ -246,4 +261,3 @@ Store/Business — see AUDIT_REPORT.md section D for how each is modeled, and
    - `BETTER_AUTH_URL` : URL publique Render (ex: `https://votre-app.onrender.com`)
    - `NODE_ENV` : `production`
    - `CORS_ORIGIN` : Origine autorisée du client (ex: `http://localhost:3000` en dév, ou URL de prod)
-

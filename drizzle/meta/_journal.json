@@ -15,6 +15,13 @@
       "when": 1792664919277,
       "tag": "0001_auth_evolution_business_user_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793458682639,
+      "tag": "0002_cloudy_scarlet_spider",
+      "breakpoints": true
     }
   ]
 }

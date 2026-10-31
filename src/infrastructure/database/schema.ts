@@ -78,6 +78,24 @@ export const users = pgTable(
   }),
 );
 
+export const pushDevices = pgTable(
+  'push_devices',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    token: text('token').notNull().unique(),
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    stockAlerts: boolean('stock_alerts').notNull().default(false),
+    salesAlerts: boolean('sales_alerts').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    userIdx: index('push_devices_user_idx').on(t.userId),
+    businessIdx: index('push_devices_business_idx').on(t.businessId),
+  }),
+);
+
 // Better Auth "session" core model.
 export const sessions = pgTable(
   'sessions',

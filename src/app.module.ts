@@ -20,6 +20,7 @@ import { CustomersModule } from './modules/customers/customers.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { HealthModule } from './modules/health/health.module';
 import { AuthExtensionModule } from './modules/auth/auth-extension.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { AuthExtensionModule } from './modules/auth/auth-extension.module';
     // NEW — dashboard/reports were entirely absent despite being an
     // explicit brief requirement. See reports.controller.ts.
     ReportsModule,
+    NotificationsModule,
     HealthModule,
     AuthExtensionModule,
     StorageModule,
