@@ -1,9 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { and, eq, inArray } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
-import { pushDevices } from '../../infrastructure/database/schema';
+import { pushDevices, users } from '../../infrastructure/database/schema';
 import { Tenant } from '../auth/tenant.type';
 import { PushDeviceDto } from './dto/push-device.dto';
+import {
+  getNotificationContent,
+  NotificationOutboxEvent,
+} from './notification-events';
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const MAX_BATCH_SIZE = 100;
@@ -13,7 +17,7 @@ type ExpoPushMessage = {
   to: string;
   title: string;
   body: string;
-  data: { kind: 'low-stock' | 'sale-created'; url: string };
+  data: { kind: string; url: string };
 };
 
 @Injectable()
@@ -52,7 +56,15 @@ export class PushNotificationsService {
 
   async notifyLowStock(businessId: string): Promise<void> {
     try {
-      await this.sendLowStockAlert(businessId);
+      const devices = await this.getSubscribedDevices(businessId, 'stock');
+      await this.sendEventToDevices({
+        id: 'legacy-low-stock',
+        businessId,
+        eventType: 'inventory.low_stock',
+        deduplicationKey: 'legacy-low-stock',
+        payload: { quantity: LOW_STOCK_THRESHOLD },
+        attempts: 0,
+      }, devices);
     } catch (error: unknown) {
       this.logger.error(
         'Could not prepare low-stock notifications.',
@@ -63,7 +75,15 @@ export class PushNotificationsService {
 
   async notifySaleCreated(businessId: string): Promise<void> {
     try {
-      await this.sendSaleAlert(businessId);
+      const devices = await this.getSubscribedDevices(businessId, 'sales');
+      await this.sendEventToDevices({
+        id: 'legacy-sale-created',
+        businessId,
+        eventType: 'sale.completed',
+        deduplicationKey: 'legacy-sale-created',
+        payload: {},
+        attempts: 0,
+      }, devices);
     } catch (error: unknown) {
       this.logger.error(
         'Could not prepare sale notifications.',
@@ -72,41 +92,36 @@ export class PushNotificationsService {
     }
   }
 
-  private async sendLowStockAlert(businessId: string): Promise<void> {
-    const devices = await this.database.db
-      .select({ token: pushDevices.token })
-      .from(pushDevices)
-      .where(and(eq(pushDevices.businessId, businessId), eq(pushDevices.stockAlerts, true)));
-
-    await this.send(devices.map(({ token }) => ({
+  async sendEventToDevices(event: NotificationOutboxEvent, tokens: string[]): Promise<void> {
+    const content = getNotificationContent(event);
+    await this.send(tokens.map((token) => ({
       to: token,
-      title: 'Stock faible',
-      body: `Un article est passé à ${LOW_STOCK_THRESHOLD} unités ou moins. Ouvrez Boutica pour vérifier le stock.`,
-      data: { kind: 'low-stock', url: '/products' },
+      title: content.title,
+      body: content.body,
+      data: content.data,
     })));
   }
 
-  private async sendSaleAlert(businessId: string): Promise<void> {
+  private async getSubscribedDevices(businessId: string, category: 'stock' | 'sales'): Promise<string[]> {
+    const preference = category === 'sales' ? pushDevices.salesAlerts : pushDevices.stockAlerts;
     const devices = await this.database.db
       .select({ token: pushDevices.token })
       .from(pushDevices)
-      .where(and(eq(pushDevices.businessId, businessId), eq(pushDevices.salesAlerts, true)));
-
-    await this.send(devices.map(({ token }) => ({
-      to: token,
-      title: 'Nouvelle vente',
-      body: 'Une vente a été enregistrée dans Boutica.',
-      data: { kind: 'sale-created', url: '/sales' },
-    })));
+      .innerJoin(users, eq(pushDevices.userId, users.id))
+      .where(and(
+        eq(pushDevices.businessId, businessId),
+        eq(users.businessId, businessId),
+        eq(preference, true),
+      ));
+    return devices.map(({ token }) => token);
   }
 
   private async send(messages: ExpoPushMessage[]): Promise<void> {
     for (let offset = 0; offset < messages.length; offset += MAX_BATCH_SIZE) {
       const batch = messages.slice(offset, offset + MAX_BATCH_SIZE);
-      let response: Response;
-
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10_000);
+      let response: Response;
       try {
         response = await fetch(EXPO_PUSH_URL, {
           method: 'POST',
@@ -119,34 +134,22 @@ export class PushNotificationsService {
           signal: controller.signal,
         });
       } catch (error) {
-        this.logger.error(
-          `Could not reach Expo Push Service for ${batch.length} device(s).`,
-          error instanceof Error ? error.stack : String(error),
-        );
-        continue;
+        throw new Error(`Could not reach Expo Push Service for ${batch.length} device(s).`, { cause: error });
       } finally {
         clearTimeout(timeout);
       }
 
       if (!response.ok) {
-        this.logger.error(`Expo Push Service returned HTTP ${response.status}.`);
-        continue;
+        throw new Error(`Expo Push Service returned HTTP ${response.status}.`);
       }
 
-      let payload: unknown;
-      try {
-        payload = await response.json();
-      } catch (error) {
-        this.logger.error(
-          'Expo Push Service returned an unreadable response.',
-          error instanceof Error ? error.stack : String(error),
-        );
-        continue;
-      }
+      const payload: unknown = await response.json();
 
       if (!payload || typeof payload !== 'object' || !('data' in payload) || !Array.isArray(payload.data)) {
-        this.logger.error('Expo Push Service returned an unexpected response shape.');
-        continue;
+        throw new Error('Expo Push Service returned an unexpected response shape.');
+      }
+      if (payload.data.length !== batch.length) {
+        throw new Error(`Expo Push Service returned ${payload.data.length} ticket(s) for ${batch.length} message(s).`);
       }
 
       const invalidTokens = payload.data.flatMap((ticket, index) => {
@@ -162,11 +165,16 @@ export class PushNotificationsService {
           .where(inArray(pushDevices.token, invalidTokens));
       }
 
-      const failedCount = payload.data.filter(
-        (ticket) => ticket && typeof ticket === 'object' && 'status' in ticket && ticket.status === 'error',
-      ).length;
-      if (failedCount > 0) {
-        this.logger.error(`Expo Push Service rejected ${failedCount} notification(s).`);
+      const failures = payload.data.filter((ticket) => {
+        if (!ticket || typeof ticket !== 'object' || !('status' in ticket) || ticket.status !== 'error') return false;
+        return !('details' in ticket)
+          || !ticket.details
+          || typeof ticket.details !== 'object'
+          || !('error' in ticket.details)
+          || ticket.details.error !== 'DeviceNotRegistered';
+      }).length;
+      if (failures > 0) {
+        throw new Error(`Expo Push Service rejected ${failures} notification(s).`);
       }
     }
   }

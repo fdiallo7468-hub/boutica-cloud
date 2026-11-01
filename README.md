@@ -148,20 +148,77 @@ two. This only matters for a browser client (Next.js) sending cookies; it's
 a no-op for bearer-token clients (Kotlin, React Native/Expo, Electron), which
 never send cookies at all.
 
-## Push notifications
+## Notifications
 
 Authenticated devices register at `POST /api/v1/notifications/devices` and
-remove themselves at `DELETE /api/v1/notifications/devices`. The API sends
-Expo Push notifications for completed sales and when an inventory adjustment
-or sale lowers stock to five units or less. Device registrations are stored
-in the `push_devices` table added by migration
-`drizzle/0002_cloudy_scarlet_spider.sql`.
+remove themselves at `DELETE /api/v1/notifications/devices`. The existing
+`push_devices` table remains the source of device tokens and the
+`stock_alerts` / `sales_alerts` preferences.
 
-Apply the migration to the deployed database before deploying this API
-version. First confirm that the database's Drizzle migration history matches
-the existing schema; do not replay the full migration chain against a
-database created with `db:push`. Back up production data and use the correct
-Neon branch before running migrations.
+Completed sales and relevant stock transitions are recorded in the additive
+PostgreSQL `notification_outbox` table inside the same transaction as the
+commercial operation. A background processor retries delivery with
+exponential backoff; external notification failures do not roll back sales or
+stock changes. Subscriber selection checks both the saved preference and
+that the user still belongs to the event's business.
+
+When Novu is configured, it orchestrates the workflows and sends mobile
+notifications through a Novu Expo provider integration. Novu subscriber IDs
+are the internal Boutica user IDs; only eligible Expo tokens and the
+minimum event payload are sent. The verified business ID and name are passed
+as the Novu tenant context. The deprecated `@novu/node` SDK has been replaced
+by `@novu/api`. Without Novu configuration, the outbox sends through the
+existing Expo Push Service path to preserve development and rollout
+compatibility.
+
+The initial workflows are `sale.completed`, `inventory.low_stock`, and
+`inventory.out_of_stock`. Low-stock notifications are emitted only when
+stock crosses from above five units to one through five; stock reaching zero
+emits the separate out-of-stock event instead. Replayed sales do not enqueue
+duplicate events. Novu's trigger idempotency key combines the durable
+outbox event and subscriber ID.
+
+### Novu setup
+
+1. Create a Novu project/environment and an Expo push integration in its
+   dashboard. Set the required Expo credentials there; never place them in
+   the client or source control.
+2. Create and publish three independent workflows with identifiers for
+   completed sale, low stock, and out of stock. Add a Push step using the
+   Expo provider. Use the trigger payload's `title`, `body`, and `data`
+   fields in that step.
+3. Configure the following backend-only variables in the local environment
+   or Render. The three workflow values must exactly match the identifiers
+   in the configured Novu environment:
+
+   ```env
+   NOVU_SECRET_KEY=
+   NOVU_SERVER_URL=https://api.novu.co
+   NOVU_WORKFLOW_SALE_COMPLETED=
+   NOVU_WORKFLOW_INVENTORY_LOW_STOCK=
+   NOVU_WORKFLOW_INVENTORY_OUT_OF_STOCK=
+   ```
+
+   `NOVU_SERVER_URL` is optional for Novu Cloud US (the SDK default).
+   `NOVU_APP_IDENTIFIER` is not used by the current server SDK. If a
+   `NOVU_SECRET_KEY` is present, all three workflow identifiers are required
+   and validated at startup. With no Novu settings, delivery remains on the
+   existing Expo path.
+4. Apply the new additive migration to a development/test database first.
+   For production, validate the Drizzle history and obtain approval before
+   applying it; do not use `db:push` or reset Neon.
+   The generated migrations are
+   `drizzle/0003_secret_tinkerer.sql` and
+   `drizzle/0004_clear_landau.sql`.
+
+Web Push, an Electron notification center, and additional event categories
+are future provider/workflow extensions; they are not enabled by these
+mobile workflows. Notification tests use mocked providers and do not send
+real messages:
+
+```bash
+npm test -- --runInBand src/modules/notifications src/modules/sales/application/create-sale.usecase.spec.ts
+```
 
 ## Idempotency
 

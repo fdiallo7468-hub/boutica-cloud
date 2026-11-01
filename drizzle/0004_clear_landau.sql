@@ -1,0 +1,3 @@
+ALTER TABLE "notification_outbox" ADD CONSTRAINT "notification_outbox_event_type_valid" CHECK ("notification_outbox"."event_type" IN ('sale.completed', 'inventory.low_stock', 'inventory.out_of_stock'));--> statement-breakpoint
+ALTER TABLE "notification_outbox" ADD CONSTRAINT "notification_outbox_status_valid" CHECK ("notification_outbox"."status" IN ('pending', 'processing', 'delivered'));--> statement-breakpoint
+ALTER TABLE "notification_outbox" ADD CONSTRAINT "notification_outbox_attempts_nonnegative" CHECK ("notification_outbox"."attempts" >= 0);

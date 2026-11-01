@@ -5,13 +5,13 @@ import { DatabaseService } from '../../../infrastructure/database/database';
 import { businesses, idempotencyKeys, saleItems, sales, stock, stockMovements, variants } from '../../../infrastructure/database/schema';
 import { Money, Quantity } from '../../../common/domain';
 import { hashRequestPayload } from '../../../common/idempotency/idempotency.util';
-import { PushNotificationsService } from '../../notifications/push-notifications.service';
+import { enqueueNotificationEvent } from '../../notifications/notification-outbox';
+import { getStockNotificationTransitions } from '../../notifications/notification-events';
 import { Tenant } from '../../auth/tenant.type';
 import { Sale, SaleItem } from '../domain/sale';
 import { CreateSaleDto } from '../dto/create-sale.dto';
 
 const ENDPOINT = 'sales.create';
-const LOW_STOCK_THRESHOLD = 5;
 
 export interface CreateSaleResult {
   body: unknown;
@@ -20,10 +20,7 @@ export interface CreateSaleResult {
 
 @Injectable()
 export class CreateSaleUseCase {
-  constructor(
-    private readonly db: DatabaseService,
-    private readonly pushNotifications: PushNotificationsService,
-  ) {}
+  constructor(private readonly db: DatabaseService) {}
 
   async execute(tenant: Tenant, dto: CreateSaleDto, idempotencyKey: string | undefined): Promise<CreateSaleResult> {
     const requestHash = hashRequestPayload(dto);
@@ -44,7 +41,7 @@ export class CreateSaleUseCase {
           if (existing.requestHash !== requestHash) {
             throw new ConflictException('Idempotency-Key was already used with a different request payload');
           }
-          return { body: existing.responseBody, replayed: true, lowStockTriggered: false };
+          return { body: existing.responseBody, replayed: true };
         }
       }
 
@@ -95,10 +92,11 @@ export class CreateSaleUseCase {
           );
         }
       }
-      const lowStockTriggered = [...demandByVariant].some(([variantId, demanded]) => {
+      const stockTransitions = [...demandByVariant].flatMap(([variantId, demanded]) => {
         const available = stockByVariant.get(variantId) ?? 0;
-        return available > LOW_STOCK_THRESHOLD
-          && available - demanded <= LOW_STOCK_THRESHOLD;
+        const quantity = available - demanded;
+        return getStockNotificationTransitions(available, quantity)
+          .map((eventType) => ({ eventType, variantId, available, quantity }));
       });
 
       const saleId = randomUUID();
@@ -178,6 +176,38 @@ export class CreateSaleUseCase {
         });
       }
 
+      await enqueueNotificationEvent(tx, {
+        businessId: tenant.businessId,
+        eventType: 'sale.completed',
+        deduplicationKey: `${tenant.businessId}:sale.completed:${saleId}`,
+        payload: {
+          saleId,
+          total: total.toDecimalString(),
+          currency,
+        },
+      });
+
+      const stockEventTypes = [...new Set(stockTransitions.map(({ eventType }) => eventType))];
+      for (const eventType of stockEventTypes) {
+        const affectedVariants = stockTransitions
+          .filter((transition) => transition.eventType === eventType)
+          .map(({ variantId, available, quantity }) => ({
+            variantId,
+            previousQuantity: available,
+            quantity,
+          }));
+        await enqueueNotificationEvent(tx, {
+          businessId: tenant.businessId,
+          eventType,
+          deduplicationKey: `${tenant.businessId}:${eventType}:${saleId}`,
+          payload: {
+            saleId,
+            variants: affectedVariants,
+            ...(affectedVariants.length === 1 ? affectedVariants[0] : {}),
+          },
+        });
+      }
+
       const responseBody = { ...saleRow, items: itemRows };
 
       if (idempotencyKey) {
@@ -197,15 +227,8 @@ export class CreateSaleUseCase {
         });
       }
 
-      return { body: responseBody, replayed: false, lowStockTriggered };
+      return { body: responseBody, replayed: false };
     });
-
-    if (!result.replayed) {
-      void this.pushNotifications.notifySaleCreated(tenant.businessId);
-      if (result.lowStockTriggered) {
-        void this.pushNotifications.notifyLowStock(tenant.businessId);
-      }
-    }
 
     return { body: result.body, replayed: result.replayed };
   }

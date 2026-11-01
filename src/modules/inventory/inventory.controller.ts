@@ -5,18 +5,14 @@ import { DatabaseService } from '../../infrastructure/database/database';
 import { stock, stockMovements, variants } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { Tenant } from '../auth/tenant.type';
-import { PushNotificationsService } from '../notifications/push-notifications.service';
+import { enqueueNotificationEvent } from '../notifications/notification-outbox';
+import { getStockNotificationTransitions } from '../notifications/notification-events';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
-
-const LOW_STOCK_THRESHOLD = 5;
 
 @ApiTags('inventory')
 @Controller('api/v1/inventory')
 export class InventoryController {
-  constructor(
-    private readonly db: DatabaseService,
-    private readonly pushNotifications: PushNotificationsService,
-  ) {}
+  constructor(private readonly db: DatabaseService) {}
 
   @Get(':variantId')
   async get(@CurrentTenant() tenant: Tenant, @Param('variantId', ParseUUIDPipe) variantId: string) {
@@ -59,28 +55,34 @@ export class InventoryController {
 
       // FIX (P2-2): manual adjustments used to bypass stock_movements
       // entirely, silently breaking the audit trail the table exists for.
+      let movementId: string | undefined;
       if (delta !== 0) {
-        await tx.insert(stockMovements).values({
+        const [movement] = await tx.insert(stockMovements).values({
           businessId: tenant.businessId,
           variantId,
           type: 'ADJUSTMENT',
           quantity: delta,
           note: body.note,
-        });
+        }).returning({ id: stockMovements.id });
+        if (!movement) throw new Error('Stock movement insert did not return the created row');
+        movementId = movement.id;
       }
 
-      return {
-        stock: updated,
-        crossedLowStockThreshold:
-          (!current || previousQuantity > LOW_STOCK_THRESHOLD)
-          && body.quantity <= LOW_STOCK_THRESHOLD,
-      };
+      if (movementId) {
+        const transitions = getStockNotificationTransitions(previousQuantity, body.quantity);
+        for (const eventType of transitions) {
+          await enqueueNotificationEvent(tx, {
+            businessId: tenant.businessId,
+            eventType,
+            deduplicationKey: `${tenant.businessId}:${eventType}:${movementId}`,
+            payload: { variantId, previousQuantity, quantity: body.quantity },
+          });
+        }
+      }
+
+      return updated;
     });
 
-    if (result.crossedLowStockThreshold) {
-      void this.pushNotifications.notifyLowStock(tenant.businessId);
-    }
-
-    return result.stock;
+    return result;
   }
 }

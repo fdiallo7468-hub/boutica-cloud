@@ -96,6 +96,38 @@ export const pushDevices = pgTable(
   }),
 );
 
+export const notificationOutbox = pgTable(
+  'notification_outbox',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    eventType: text('event_type').notNull(),
+    deduplicationKey: text('deduplication_key').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+    status: text('status').$type<'pending' | 'processing' | 'delivered'>().notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    availableAt: timestamp('available_at', { withTimezone: true }).defaultNow().notNull(),
+    lockedAt: timestamp('locked_at', { withTimezone: true }),
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  },
+  (t) => ({
+    deduplicationUnique: uniqueIndex('notification_outbox_deduplication_unique').on(t.deduplicationKey),
+    pendingIdx: index('notification_outbox_pending_idx').on(t.status, t.availableAt),
+    businessIdx: index('notification_outbox_business_idx').on(t.businessId),
+    eventTypeValid: check(
+      'notification_outbox_event_type_valid',
+      sql`${t.eventType} IN ('sale.completed', 'inventory.low_stock', 'inventory.out_of_stock')`,
+    ),
+    statusValid: check(
+      'notification_outbox_status_valid',
+      sql`${t.status} IN ('pending', 'processing', 'delivered')`,
+    ),
+    attemptsNonNegative: check('notification_outbox_attempts_nonnegative', sql`${t.attempts} >= 0`),
+  }),
+);
+
 // Better Auth "session" core model.
 export const sessions = pgTable(
   'sessions',

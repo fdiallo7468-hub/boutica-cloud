@@ -131,6 +131,37 @@ describe('envSchema Validation & Security', () => {
       expect(parsed.BETTER_AUTH_URL).toBe('http://localhost:3000');
       expect(parsed.CORS_ORIGIN).toBe('http://localhost:3000,http://localhost:5173');
       expect(parsed.UPLOADS_DIR).toBe('./uploads');
+      expect(parsed.NOVU_SECRET_KEY).toBeUndefined();
+    });
+
+    it('keeps Novu optional when its environment variables are blank or absent', () => {
+      const parsed = envSchema.parse({
+        NODE_ENV: 'development',
+        NOVU_SECRET_KEY: '',
+        NOVU_SERVER_URL: '',
+        NOVU_WORKFLOW_SALE_COMPLETED: '',
+        NOVU_WORKFLOW_INVENTORY_LOW_STOCK: '',
+        NOVU_WORKFLOW_INVENTORY_OUT_OF_STOCK: '',
+      });
+
+      expect(parsed.NOVU_SECRET_KEY).toBeUndefined();
+      expect(parsed.NOVU_SERVER_URL).toBeUndefined();
+    });
+
+    it('requires all three configured workflow identifiers when Novu is enabled', () => {
+      const result = envSchema.safeParse({
+        NODE_ENV: 'development',
+        NOVU_SECRET_KEY: 'test-secret',
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.map((issue) => issue.path[0])).toEqual(expect.arrayContaining([
+          'NOVU_WORKFLOW_SALE_COMPLETED',
+          'NOVU_WORKFLOW_INVENTORY_LOW_STOCK',
+          'NOVU_WORKFLOW_INVENTORY_OUT_OF_STOCK',
+        ]));
+      }
     });
 
     it('devrait accepter des valeurs personnalisées en développement', () => {

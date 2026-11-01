@@ -9,7 +9,8 @@ describe('PushNotificationsService', () => {
 
   beforeEach(() => {
     where = jest.fn().mockResolvedValue([{ token: 'ExpoPushToken[test-device]' }]);
-    const from = jest.fn().mockReturnValue({ where });
+    const innerJoin = jest.fn().mockReturnValue({ where });
+    const from = jest.fn().mockReturnValue({ innerJoin });
     const select = jest.fn().mockReturnValue({ from });
     const database = { db: { select } } as unknown as DatabaseService;
     service = new PushNotificationsService(database);
@@ -63,5 +64,41 @@ describe('PushNotificationsService', () => {
     await service.notifySaleCreated(businessId);
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sends an out-of-stock push through the existing Expo transport', async () => {
+    await service.sendEventToDevices({
+      id: 'event-1',
+      businessId,
+      eventType: 'inventory.out_of_stock',
+      deduplicationKey: 'out-of-stock-event',
+      payload: { variantId: 'variant-1', quantity: 0 },
+      attempts: 1,
+    }, ['ExpoPushToken[test-device]']);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://exp.host/--/api/v2/push/send',
+      expect.objectContaining({
+        body: JSON.stringify([{
+          to: 'ExpoPushToken[test-device]',
+          title: 'Rupture de stock',
+          body: 'Un article est en rupture de stock. Ouvrez Boutica pour vérifier le stock.',
+          data: { kind: 'out-of-stock', url: '/products' },
+        }]),
+      }),
+    );
+  });
+
+  it('surfaces Expo failures so the outbox can retry delivery', async () => {
+    fetchMock.mockRejectedValue(new Error('network unavailable'));
+
+    await expect(service.sendEventToDevices({
+      id: 'event-1',
+      businessId,
+      eventType: 'sale.completed',
+      deduplicationKey: 'sale-event',
+      payload: {},
+      attempts: 1,
+    }, ['ExpoPushToken[test-device]'])).rejects.toThrow('Could not reach Expo Push Service');
   });
 });
