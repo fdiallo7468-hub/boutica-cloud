@@ -1,9 +1,9 @@
 import { Controller, Get, Header, Query, Res } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, lte, ne, sql } from 'drizzle-orm';
 import type { Response } from 'express';
 import { DatabaseService } from '../../infrastructure/database/database';
-import { expenses, products, saleItems, sales, stock, variants } from '../../infrastructure/database/schema';
+import { expenses, products, receivables, saleItems, sales, stock, variants } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { Tenant } from '../auth/tenant.type';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
@@ -40,6 +40,7 @@ export class ReportsController {
       recentSales,
       topProducts,
       lowStock,
+      receivablesRows,
     ] = await Promise.all([
       this.db.db
         .select({ revenue: sql<string>`coalesce(sum(${sales.total}), 0)` })
@@ -90,12 +91,21 @@ export class ReportsController {
         .innerJoin(variants, eq(stock.variantId, variants.id))
         .where(and(eq(stock.businessId, businessId), lte(stock.quantity, query.lowStockThreshold)))
         .orderBy(stock.quantity),
+      this.db.db
+        .select({
+          totalOutstanding: sql<string>`coalesce(sum(${receivables.remainingBalance}), '0.00')`,
+          overdueAmount: sql<string>`coalesce(sum(case when ${receivables.dueDate} < now() and ${receivables.remainingBalance} > 0 then ${receivables.remainingBalance} else 0 end), '0.00')`,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(receivables)
+        .where(and(eq(receivables.businessId, businessId), ne(receivables.status, 'PAID'), ne(receivables.status, 'CANCELLED'))),
     ]);
 
     const revenue = revenueRows[0]?.revenue ?? '0.00';
     const expensesTotal = expensesRows[0]?.expensesTotal ?? '0.00';
     const grossMargin = grossMarginRows[0]?.grossMargin ?? '0.00';
     const stockValue = stockValueRows[0]?.stockValue ?? '0.00';
+    const receivablesSummary = receivablesRows[0] ?? { totalOutstanding: '0.00', overdueAmount: '0.00', count: 0 };
 
     return {
       period: { from: from.toISOString(), to: to.toISOString() },
@@ -103,7 +113,11 @@ export class ReportsController {
       expensesTotal,
       estimatedProfit: ((toMinorUnits(grossMargin) - toMinorUnits(expensesTotal)) / 100).toFixed(2),
       stockValue,
-      receivables: null,
+      receivables: {
+        totalOutstanding: receivablesSummary.totalOutstanding,
+        overdueAmount: receivablesSummary.overdueAmount,
+        activeCount: receivablesSummary.count,
+      },
       recentSales,
       topProducts,
       lowStockAlerts: lowStock,

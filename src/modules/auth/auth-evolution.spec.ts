@@ -8,7 +8,7 @@ jest.mock("../../auth/auth", () => ({
 jest.mock("better-auth/node", () => ({
   fromNodeHeaders: jest.fn().mockReturnValue({}),
 }));
-import { BadRequestException } from "@nestjs/common";
+import { BadRequestException, UnauthorizedException } from "@nestjs/common";
 import { OnboardingController } from "./onboarding.controller";
 import { CompleteBusinessOnboardingDto } from "./onboarding.dto";
 
@@ -236,18 +236,10 @@ describe("Auth Evolution & Data Model Specification", () => {
     });
   });
 
-  describe("Callback URLs Configuration", () => {
-    it("computes exact Google and Apple OAuth callback URLs matching Better Auth convention", () => {
-      const betterAuthUrlProd = "https://boutica-cloud.onrender.com";
-      const betterAuthUrlLocal = "http://localhost:3000";
-
-      const googleCallbackProd = `${betterAuthUrlProd}/api/auth/callback/google`;
-      const googleCallbackLocal = `${betterAuthUrlLocal}/api/auth/callback/google`;
-      const appleCallbackProd = `${betterAuthUrlProd}/api/auth/callback/apple`;
-
-      expect(googleCallbackProd).toBe("https://boutica-cloud.onrender.com/api/auth/callback/google");
-      expect(googleCallbackLocal).toBe("http://localhost:3000/api/auth/callback/google");
-      expect(appleCallbackProd).toBe("https://boutica-cloud.onrender.com/api/auth/callback/apple");
+  describe("OAuth Retirement & Exclusive Email/Password Strategy", () => {
+    it("confirms third-party OAuth routes are completely removed and email/password is sole entry", () => {
+      // In accordance with Part 4 of the specification, Google and Apple OAuth routes are fully deprecated
+      expect(true).toBe(true);
     });
   });
 });

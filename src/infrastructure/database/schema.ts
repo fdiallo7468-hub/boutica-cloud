@@ -26,11 +26,73 @@ export const businesses = pgTable('businesses', {
   name: text('name').notNull(),
   currency: text('currency').notNull().default('XOF'),
   phone: text('phone'),
-  sector: text('sector'),
+  sector: text('sector').notNull().default('QUINCAILLERIE'),
   address: text('address'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+/**
+ * Activités commerciales d'une entreprise (secteur Quincaillerie et Électronique).
+ * Une entreprise peut posséder plusieurs activités compatibles.
+ * Le retrait d'une activité passe is_active à false sans jamais supprimer de données historiques.
+ */
+export const businessActivities = pgTable(
+  'business_activities',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    activity: text('activity').notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessActivityUnique: uniqueIndex('business_activities_business_activity_unique').on(t.businessId, t.activity),
+    businessIdx: index('business_activities_business_idx').on(t.businessId),
+  }),
+);
+
+/**
+ * Configuration modulaire dynamique par entreprise.
+ * Active ou désactive les modules spécialisés (IMEI, Garanties, Unités de mesure, etc.)
+ */
+export const businessModuleConfigurations = pgTable(
+  'business_module_configurations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    module: text('module').notNull(),
+    isEnabled: boolean('is_enabled').notNull().default(true),
+    settings: jsonb('settings').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessModuleUnique: uniqueIndex('business_modules_business_module_unique').on(t.businessId, t.module),
+    businessIdx: index('business_modules_business_idx').on(t.businessId),
+  }),
+);
+
+/**
+ * Appartenance multi-entreprises : un utilisateur peut appartenir à plusieurs boutiques/entreprises.
+ */
+export const businessMembers = pgTable(
+  'business_members',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    role: userRole('role').notNull().default('OWNER'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    memberUnique: uniqueIndex('business_members_unique').on(t.businessId, t.userId),
+    userIdx: index('business_members_user_idx').on(t.userId),
+    businessIdx: index('business_members_business_idx').on(t.businessId),
+  }),
+);
 
 // v2.0 — Better Auth owns this table now (mapped via drizzleAdapter's
 // `schema: { user: schema.users, ... }` option in src/auth/auth.ts).
@@ -75,56 +137,6 @@ export const users = pgTable(
   (t) => ({
     emailUnique: uniqueIndex('users_email_unique').on(t.email),
     businessIdx: index('users_business_idx').on(t.businessId),
-  }),
-);
-
-export const pushDevices = pgTable(
-  'push_devices',
-  {
-    id: uuid('id').defaultRandom().primaryKey(),
-    token: text('token').notNull().unique(),
-    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
-    stockAlerts: boolean('stock_alerts').notNull().default(false),
-    salesAlerts: boolean('sales_alerts').notNull().default(false),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-  },
-  (t) => ({
-    userIdx: index('push_devices_user_idx').on(t.userId),
-    businessIdx: index('push_devices_business_idx').on(t.businessId),
-  }),
-);
-
-export const notificationOutbox = pgTable(
-  'notification_outbox',
-  {
-    id: uuid('id').defaultRandom().primaryKey(),
-    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
-    eventType: text('event_type').notNull(),
-    deduplicationKey: text('deduplication_key').notNull(),
-    payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
-    status: text('status').$type<'pending' | 'processing' | 'delivered'>().notNull().default('pending'),
-    attempts: integer('attempts').notNull().default(0),
-    availableAt: timestamp('available_at', { withTimezone: true }).defaultNow().notNull(),
-    lockedAt: timestamp('locked_at', { withTimezone: true }),
-    lastError: text('last_error'),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
-  },
-  (t) => ({
-    deduplicationUnique: uniqueIndex('notification_outbox_deduplication_unique').on(t.deduplicationKey),
-    pendingIdx: index('notification_outbox_pending_idx').on(t.status, t.availableAt),
-    businessIdx: index('notification_outbox_business_idx').on(t.businessId),
-    eventTypeValid: check(
-      'notification_outbox_event_type_valid',
-      sql`${t.eventType} IN ('sale.completed', 'inventory.low_stock', 'inventory.out_of_stock')`,
-    ),
-    statusValid: check(
-      'notification_outbox_status_valid',
-      sql`${t.status} IN ('pending', 'processing', 'delivered')`,
-    ),
-    attemptsNonNegative: check('notification_outbox_attempts_nonnegative', sql`${t.attempts} >= 0`),
   }),
 );
 
@@ -219,6 +231,11 @@ export const variants = pgTable(
     purchasePrice: numeric('purchase_price', { precision: 14, scale: 2 }).notNull().default('0'),
     sellingPrice: numeric('selling_price', { precision: 14, scale: 2 }).notNull().default('0'),
     imageUrl: text('image_url'),
+    // Nouveaux champs modulaires compatibles Quincaillerie & Électronique
+    unit: text('unit'), // Ex: "Sac", "Barre", "Mètre", "Pièce", "Carton", "Rouleau", "Kg"
+    hasSerial: boolean('has_serial').notNull().default(false), // Requis pour Électronique (appareils, TV, PC)
+    hasImei: boolean('has_imei').notNull().default(false), // Requis pour Téléphonie (Smartphones, tablettes)
+    warrantyMonths: integer('warranty_months').notNull().default(0), // Durée de garantie en mois
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -232,6 +249,34 @@ export const variants = pgTable(
     businessIdx: index('variants_business_idx').on(t.businessId),
     sellingGtePurchase: check('variant_selling_gte_purchase', sql`${t.sellingPrice} >= ${t.purchasePrice}`),
     pricesNonNegative: check('variant_prices_non_negative', sql`${t.purchasePrice} >= 0 AND ${t.sellingPrice} >= 0`),
+  }),
+);
+
+/**
+ * Traçabilité unitaire des numéros de série et IMEI (Secteur Électronique).
+ * Permet le suivi individuel de chaque appareil vendu, la validation de garantie et le SAV.
+ */
+export const deviceSerials = pgTable(
+  'device_serials',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    variantId: uuid('variant_id').notNull().references(() => variants.id, { onDelete: 'cascade' }),
+    serialNumber: text('serial_number'),
+    imei: text('imei'),
+    status: text('status').notNull().default('IN_STOCK'), // 'IN_STOCK', 'SOLD', 'DEFECTIVE', 'REPAIR'
+    warrantyMonths: integer('warranty_months').notNull().default(0),
+    saleItemId: uuid('sale_item_id'),
+    soldAt: timestamp('sold_at', { withTimezone: true }),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessIdx: index('device_serials_business_idx').on(t.businessId),
+    variantIdx: index('device_serials_variant_idx').on(t.variantId),
+    serialUnique: uniqueIndex('device_serials_business_serial_unique').on(t.businessId, t.serialNumber),
+    imeiUnique: uniqueIndex('device_serials_business_imei_unique').on(t.businessId, t.imei),
   }),
 );
 
@@ -400,3 +445,176 @@ export const idempotencyKeys = pgTable(
     scopeUnique: uniqueIndex('idempotency_keys_scope_unique').on(t.businessId, t.endpoint, t.key),
   }),
 );
+
+/**
+ * ---------------------------------------------------------------------------
+ * PARTIE 5 — NOTIFICATION OUTBOX (NOVU WORKER ENGINE)
+ * Table d'outbox persistante transactionnelle avec déduplication et retry exponentiel.
+ * ---------------------------------------------------------------------------
+ */
+export const notificationOutbox = pgTable(
+  'notification_outbox',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    eventType: text('event_type').notNull(),
+    deduplicationKey: text('deduplication_key').notNull(),
+    payload: jsonb('payload').notNull().default({}),
+    status: text('status').notNull().default('PENDING'), // 'PENDING', 'PROCESSING', 'DELIVERED', 'FAILED'
+    attempts: integer('attempts').notNull().default(0),
+    availableAt: timestamp('available_at', { withTimezone: true }).defaultNow().notNull(),
+    lockedAt: timestamp('locked_at', { withTimezone: true }),
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  },
+  (t) => ({
+    deduplicationKeyIdx: index('notification_outbox_dedup_idx').on(t.deduplicationKey),
+    statusIdx: index('notification_outbox_status_idx').on(t.status),
+    availableAtIdx: index('notification_outbox_available_at_idx').on(t.availableAt),
+    businessIdx: index('notification_outbox_business_idx').on(t.businessId),
+  }),
+);
+
+export const pushDevices = pgTable(
+  'push_devices',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    token: text('token').notNull(),
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    stockAlerts: boolean('stock_alerts').notNull().default(true),
+    salesAlerts: boolean('sales_alerts').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessIdx: index('push_devices_business_idx').on(t.businessId),
+    userIdx: index('push_devices_user_idx').on(t.userId),
+  }),
+);
+
+/**
+ * ---------------------------------------------------------------------------
+ * PARTIE 6 — MODULE CRÉANCES & PAIEMENTS
+ * Gestion financière rigoureuse des règlements intégraux, partiels et différés.
+ * Précision monétaire numeric(14, 2) et traçabilité complète.
+ * ---------------------------------------------------------------------------
+ */
+export const receivables = pgTable(
+  'receivables',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    customerId: uuid('customer_id').notNull().references(() => customers.id),
+    saleId: uuid('sale_id').notNull().references(() => sales.id, { onDelete: 'cascade' }),
+    initialAmount: numeric('initial_amount', { precision: 14, scale: 2 }).notNull(),
+    paidAmount: numeric('paid_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+    remainingBalance: numeric('remaining_balance', { precision: 14, scale: 2 }).notNull(),
+    dueDate: timestamp('due_date', { withTimezone: true }),
+    status: text('status').notNull().default('PENDING'), // 'PENDING', 'PARTIALLY_PAID', 'OVERDUE', 'PAID', 'CANCELLED'
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessIdx: index('receivables_business_idx').on(t.businessId),
+    customerIdx: index('receivables_customer_idx').on(t.customerId),
+    saleIdx: index('receivables_sale_idx').on(t.saleId),
+    statusIdx: index('receivables_status_idx').on(t.status),
+    dueDateIdx: index('receivables_due_date_idx').on(t.dueDate),
+  }),
+);
+
+export const payments = pgTable(
+  'payments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    customerId: uuid('customer_id').notNull().references(() => customers.id),
+    saleId: uuid('sale_id').references(() => sales.id),
+    receivableId: uuid('receivable_id').references(() => receivables.id),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    paymentMethod: text('payment_method').notNull().default('CASH'), // CASH, ORANGE_MONEY, MOOV_MONEY, BANK_TRANSFER, CARD, WAVE, OTHER
+    transactionReference: text('transaction_reference'),
+    recordedBy: text('recorded_by').references(() => users.id),
+    status: text('status').notNull().default('CONFIRMED'), // 'CONFIRMED', 'CANCELLED'
+    receiptNumber: text('receipt_number').notNull(),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessIdx: index('payments_business_idx').on(t.businessId),
+    customerIdx: index('payments_customer_idx').on(t.customerId),
+    saleIdx: index('payments_sale_idx').on(t.saleId),
+    receivableIdx: index('payments_receivable_idx').on(t.receivableId),
+    statusIdx: index('payments_status_idx').on(t.status),
+    receiptUnique: uniqueIndex('payments_receipt_number_unique').on(t.businessId, t.receiptNumber),
+  }),
+);
+
+export const paymentCancellations = pgTable(
+  'payment_cancellations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    paymentId: uuid('payment_id').notNull().references(() => payments.id, { onDelete: 'cascade' }),
+    cancelledBy: text('cancelled_by').notNull().references(() => users.id),
+    reason: text('reason').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessIdx: index('payment_cancellations_business_idx').on(t.businessId),
+    paymentIdx: index('payment_cancellations_payment_idx').on(t.paymentId),
+  }),
+);
+
+/**
+ * ---------------------------------------------------------------------------
+ * PARTIE 7 — MODE HORS LIGNE & SYNCHRONISATION (OFFLINE-FIRST)
+ * Suivi des appareils enregistrés et journal d'idempotence des opérations locales.
+ * ---------------------------------------------------------------------------
+ */
+export const syncDevices = pgTable(
+  'sync_devices',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    deviceId: text('device_id').notNull(),
+    deviceType: text('device_type').notNull().default('DESKTOP'), // 'DESKTOP', 'MOBILE'
+    deviceName: text('device_name'),
+    appVersion: text('app_version'),
+    lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    deviceScopeUnique: uniqueIndex('sync_devices_scope_unique').on(t.businessId, t.deviceId),
+    businessIdx: index('sync_devices_business_idx').on(t.businessId),
+  }),
+);
+
+export const offlineOperationsLog = pgTable(
+  'offline_operations_log',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    deviceId: text('device_id').notNull(),
+    clientOperationId: text('client_operation_id').notNull(),
+    operationType: text('operation_type').notNull(), // 'CREATE_SALE', 'RECORD_PAYMENT', etc.
+    status: text('status').notNull().default('COMMITTED'), // 'COMMITTED', 'REJECTED', 'CONFLICT_RESOLVED'
+    clientTimestamp: timestamp('client_timestamp', { withTimezone: true }).notNull(),
+    serverTimestamp: timestamp('server_timestamp', { withTimezone: true }).defaultNow().notNull(),
+    payload: jsonb('payload').notNull().default({}),
+    conflictDetails: jsonb('conflict_details'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    opUnique: uniqueIndex('offline_ops_client_op_unique').on(t.businessId, t.clientOperationId),
+    businessIdx: index('offline_ops_business_idx').on(t.businessId),
+    deviceIdx: index('offline_ops_device_idx').on(t.deviceId),
+  }),
+);
+

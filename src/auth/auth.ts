@@ -5,71 +5,33 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { envSchema } from "../config/env.schema";
-import { accounts, businesses, sessions, users, verifications } from "../infrastructure/database/schema";
+import { accounts, businesses, businessActivities, businessMembers, businessModuleConfigurations, sessions, users, verifications } from "../infrastructure/database/schema";
+import { BUSINESS_SECTORS, BusinessSectorType, getDefaultModulesForSector, SECTOR_ACTIVITIES } from "../modules/business/business-taxonomy";
 
 /**
- * v2.2 — Better Auth instance for Boutica Cloud.
+ * v2.3 — Better Auth instance for Boutica Cloud.
  *
  * Implements:
- * - Complete business + user data model (Business: name, currency, phone, sector, address / User: name, email, personal phone)
- * - Anti-account-hijacking (accountLinking: false)
- * - Safe Google & Apple OAuth with explicit business onboarding flow (no arbitrary business generation)
- * - Resend integration for password reset with 1h token expiration, single-use invalidation, and graceful offline fallback
- * - Prevention of orphaned businesses via email pre-validation
- * - Protection against client-side injection of businessId or privileged roles
+ * - Strict Boutica Authentication (primary entry point is Email + Password)
+ * - Anti-account-hijacking (accountLinking: false, disableSignUp: true on social providers)
+ * - Rejection of unlinked Google & Apple sign-in attempts (no auto user/business creation)
+ * - Dual Sector initialization (Quincaillerie / Électronique) with activities, modular config & business members
+ * - Resend integration for password reset with 1h token expiration, single-use invalidation
+ * - Multi-business access control & isolation
  */
 const env = envSchema.parse(process.env);
 const useSsl = env.DATABASE_URL.includes("sslmode=require") || env.NODE_ENV === "production";
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  })[character]!);
-}
-
-async function sendAuthEmail(to: string, subject: string, html: string): Promise<void> {
-  if (!env.RESEND_API_KEY) {
-    throw new Error("[Auth/Resend] RESEND_API_KEY absent : l'e-mail de vérification ne peut pas être envoyé.");
-  }
-
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.RESEND_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from: env.EMAIL_FROM,
-      to: [to],
-      subject,
-      html,
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`[Auth/Resend] Échec d'envoi de l'e-mail de vérification : ${error}`);
-  }
-}
-
 const pool = new Pool({
   connectionString: env.DATABASE_URL,
   max: 5,
   ...(useSsl ? { ssl: { rejectUnauthorized: env.NODE_ENV === "production" } } : {}),
 });
-const db = drizzle(pool, { schema: { users, sessions, accounts, verifications, businesses } });
+const db = drizzle(pool, { schema: { users, sessions, accounts, verifications, businesses, businessActivities, businessModuleConfigurations, businessMembers } });
 
 export const auth = betterAuth({
   secret: env.BETTER_AUTH_SECRET,
   baseURL: env.BETTER_AUTH_URL,
-  trustedOrigins: [
-    ...(env.CORS_ORIGIN?.split(",").map((o) => o.trim()).filter(Boolean) ?? []),
-    "bouticaandroid://settings",
-  ],
+  trustedOrigins: env.CORS_ORIGIN?.split(",").map((o) => o.trim()),
 
   database: drizzleAdapter(db, {
     provider: "pg",
@@ -81,33 +43,11 @@ export const auth = betterAuth({
     },
   }),
 
-  // Account linking is deliberately disabled to prevent account hijacking:
-  // An attacker cannot link a third-party Google/Apple account to an existing password account
-  // merely by having matching email addresses without prior explicit ownership verification.
+  // Account configuration: Email + Password is the sole authenticating mechanism
   account: {
     accountLinking: {
       enabled: false,
     },
-  },
-
-  // Social OAuth Providers (activated only when corresponding credentials are configured)
-  socialProviders: {
-    ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
-      ? {
-          google: {
-            clientId: env.GOOGLE_CLIENT_ID,
-            clientSecret: env.GOOGLE_CLIENT_SECRET,
-          },
-        }
-      : {}),
-    ...(env.APPLE_CLIENT_ID && env.APPLE_CLIENT_SECRET
-      ? {
-          apple: {
-            clientId: env.APPLE_CLIENT_ID,
-            clientSecret: env.APPLE_CLIENT_SECRET,
-          },
-        }
-      : {}),
   },
 
   emailAndPassword: {
@@ -136,11 +76,11 @@ export const auth = betterAuth({
               html: `
                 <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
                   <h2 style="color: #0f172a; margin-bottom: 16px;">Réinitialisation de votre mot de passe</h2>
-                  <p>Bonjour ${escapeHtml(user.name || "")},</p>
+                  <p>Bonjour ${user.name || ""},</p>
                   <p>Une demande de réinitialisation de mot de passe a été initiée pour votre compte Boutica Cloud.</p>
                   <p>Ce lien est à usage unique et reste valide pendant <strong>1 heure</strong> :</p>
                   <div style="margin: 28px 0;">
-                    <a href="${escapeHtml(resetLink)}" style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block;">
+                    <a href="${resetLink}" style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block;">
                       Réinitialiser mon mot de passe
                     </a>
                   </div>
@@ -161,61 +101,12 @@ export const auth = betterAuth({
           console.error("[Auth/Resend] Erreur de communication avec l'API Resend:", err);
         }
       } else {
-        console.warn("[Auth/Resend] E-mail de réinitialisation non envoyé : RESEND_API_KEY absent.");
+        console.log(`[Auth/Resend] Simulation d'envoi (RESEND_API_KEY absent) pour ${user.email} -> ${resetLink}`);
       }
     },
   },
 
-  emailVerification: {
-    sendVerificationEmail: async ({ user, url }) => {
-      await sendAuthEmail(
-        user.email,
-        "Vérifiez votre adresse e-mail Boutica",
-        `
-          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
-            <h2 style="color: #0f172a; margin-bottom: 16px;">Vérification de votre adresse e-mail</h2>
-            <p>Bonjour ${escapeHtml(user.name || "")},</p>
-            <p>Confirmez que vous avez accès à cette adresse afin de pouvoir modifier l'e-mail de votre compte Boutica.</p>
-            <div style="margin: 28px 0;">
-              <a href="${escapeHtml(url)}" style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block;">
-                Vérifier mon adresse e-mail
-              </a>
-            </div>
-            <p style="color: #64748b; font-size: 13px; line-height: 1.5;">
-              Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail.
-            </p>
-          </div>
-        `,
-      );
-    },
-  },
-
   user: {
-    changeEmail: {
-      enabled: true,
-      sendChangeEmailVerification: async ({ user, newEmail, url }) => {
-        await sendAuthEmail(
-          newEmail,
-          "Confirmez votre nouvelle adresse e-mail Boutica",
-          `
-            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
-              <h2 style="color: #0f172a; margin-bottom: 16px;">Confirmez votre nouvelle adresse e-mail</h2>
-              <p>Bonjour ${escapeHtml(user.name || "")},</p>
-              <p>Une demande de changement d'adresse e-mail a été faite pour votre compte Boutica.</p>
-              <p>Votre adresse actuelle restera inchangée jusqu'à la confirmation de cette nouvelle adresse.</p>
-              <div style="margin: 28px 0;">
-                <a href="${escapeHtml(url)}" style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block;">
-                  Confirmer ma nouvelle adresse
-                </a>
-              </div>
-              <p style="color: #64748b; font-size: 13px; line-height: 1.5;">
-                Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail. Votre adresse ne sera pas modifiée.
-              </p>
-            </div>
-          `,
-        );
-      },
-    },
     additionalFields: {
       businessId: {
         type: "string",
@@ -285,54 +176,84 @@ export const auth = betterAuth({
           const currency = rawCurrency && /^[A-Z]{3}$/.test(rawCurrency) ? rawCurrency : "XOF";
           const businessName = (user as { businessName?: string }).businessName?.trim();
           const businessPhone = (user as { businessPhone?: string }).businessPhone?.trim() || null;
-          const businessSector = (user as { businessSector?: string }).businessSector?.trim() || null;
+          const rawSector = (user as { businessSector?: string }).businessSector?.trim()?.toUpperCase();
+          const sector: BusinessSectorType = rawSector === "ELECTRONIQUE" ? "ELECTRONIQUE" : "QUINCAILLERIE";
           const businessAddress = (user as { businessAddress?: string }).businessAddress?.trim() || null;
           const personalPhone = (user as { personalPhone?: string }).personalPhone?.trim() || null;
 
-          // 2. If business details are provided (e.g. Email Sign-up form):
-          if (businessName) {
-            if (businessName.length < 2 || businessName.length > 120) {
-              throw new Error("Le nom de l'entreprise doit comporter entre 2 et 120 caractères");
-            }
-
-            const [business] = await db
-              .insert(businesses)
-              .values({
-                name: businessName,
-                currency,
-                phone: businessPhone,
-                sector: businessSector,
-                address: businessAddress,
-              })
-              .returning();
-
-            if (!business) {
-              throw new Error("Échec de la création de l'entreprise");
-            }
-
-            return {
-              data: {
-                ...user,
-                email: rawEmail,
-                businessId: business.id,
-                personalPhone,
-                role: "OWNER",
-              },
-            };
+          // 2. Strict Boutica Auth Rule:
+          // Account creation MUST have a valid businessName (Email + Password signup form).
+          // Direct OAuth signup attempts are strictly blocked.
+          if (!businessName) {
+            throw new Error(
+              "L'inscription directe via un fournisseur tiers n'est pas autorisée. Veuillez créer votre compte Boutica avec un e-mail et mot de passe, puis lier vos fournisseurs dans les paramètres.",
+            );
           }
 
-          // 3. If no businessName was provided (e.g. initial Google or Apple OAuth sign-in):
-          // We DO NOT assign an arbitrary business. The user row is created with businessId: null,
-          // and the user must complete onboarding via /api/v1/auth/onboarding/business.
+          if (businessName.length < 2 || businessName.length > 120) {
+            throw new Error("Le nom de l'entreprise doit comporter entre 2 et 120 caractères");
+          }
+
+          // 3. Atomically create business, default sector activities, and default modules
+          const [business] = await db
+            .insert(businesses)
+            .values({
+              name: businessName,
+              currency,
+              phone: businessPhone,
+              sector,
+              address: businessAddress,
+            })
+            .returning();
+
+          if (!business) {
+            throw new Error("Échec de la création de l'entreprise");
+          }
+
+          // Seed default activities for selected sector
+          const defaultActivities = SECTOR_ACTIVITIES[sector].map((act) => ({
+            businessId: business.id,
+            activity: act.code,
+            isActive: true,
+          }));
+          if (defaultActivities.length > 0) {
+            await db.insert(businessActivities).values(defaultActivities).onConflictDoNothing();
+          }
+
+          // Seed default module configurations for selected sector
+          const defaultModules = getDefaultModulesForSector(sector).map((modCode) => ({
+            businessId: business.id,
+            module: modCode,
+            isEnabled: true,
+            settings: {},
+          }));
+          if (defaultModules.length > 0) {
+            await db.insert(businessModuleConfigurations).values(defaultModules).onConflictDoNothing();
+          }
+
           return {
             data: {
               ...user,
               email: rawEmail,
-              businessId: null,
+              businessId: business.id,
               personalPhone,
               role: "OWNER",
             },
           };
+        },
+        after: async (user) => {
+          // Record business ownership in business_members table
+          const customUser = user as typeof user & { businessId?: string | null; role?: string };
+          if (customUser.businessId && customUser.id) {
+            await db
+              .insert(businessMembers)
+              .values({
+                businessId: customUser.businessId,
+                userId: customUser.id,
+                role: (customUser.role as "OWNER" | "STAFF") || "OWNER",
+              })
+              .onConflictDoNothing();
+          }
         },
       },
     },

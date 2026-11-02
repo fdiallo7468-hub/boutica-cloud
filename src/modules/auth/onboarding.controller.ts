@@ -13,7 +13,20 @@ import { eq } from "drizzle-orm";
 import type { Request } from "express";
 import { auth } from "../../auth/auth";
 import { DatabaseService } from "../../infrastructure/database/database";
-import { businesses, users } from "../../infrastructure/database/schema";
+import {
+  businesses,
+  businessActivities,
+  businessMembers,
+  businessModuleConfigurations,
+  users,
+} from "../../infrastructure/database/schema";
+import {
+  BUSINESS_SECTORS,
+  BusinessSectorType,
+  getDefaultModulesForSector,
+  SECTOR_ACTIVITIES,
+  validateActivitiesForSector,
+} from "../business/business-taxonomy";
 import { CompleteBusinessOnboardingDto } from "./onboarding.dto";
 
 @Controller("api/v1/auth/onboarding")
@@ -47,7 +60,26 @@ export class OnboardingController {
     const currency = dto.currency?.toUpperCase() || "XOF";
     const name = dto.businessName.trim();
     const phone = dto.businessPhone?.trim() || null;
-    const sector = dto.businessSector?.trim() || null;
+    const rawSector = dto.businessSector?.trim()?.toUpperCase();
+    const sector: BusinessSectorType =
+      rawSector === BUSINESS_SECTORS.ELECTRONIQUE
+        ? BUSINESS_SECTORS.ELECTRONIQUE
+        : BUSINESS_SECTORS.QUINCAILLERIE;
+
+    // Validate activities if provided
+    let chosenActivities = dto.businessActivities;
+    if (chosenActivities && chosenActivities.length > 0) {
+      const validation = validateActivitiesForSector(sector, chosenActivities);
+      if (!validation.valid) {
+        throw new BadRequestException(
+          `Les activités suivantes ne sont pas valides pour le secteur ${sector} : ${validation.invalidCodes.join(", ")}`,
+        );
+      }
+    } else {
+      // Default to all standard activities of the sector
+      chosenActivities = SECTOR_ACTIVITIES[sector].map((a) => a.code);
+    }
+
     const address = dto.businessAddress?.trim() || null;
     const personalPhone = dto.personalPhone?.trim() || null;
 
@@ -68,6 +100,52 @@ export class OnboardingController {
         throw new Error("Impossible d'insérer l'entreprise");
       }
 
+      // 1. Insert business membership
+      const memberInsert = tx
+        .insert(businessMembers)
+        .values({
+          businessId: business.id,
+          userId,
+          role: "OWNER",
+        });
+      if (typeof (memberInsert as any)?.onConflictDoNothing === "function") {
+        await (memberInsert as any).onConflictDoNothing();
+      } else {
+        await memberInsert;
+      }
+
+      // 2. Insert activities
+      const activityRows = chosenActivities!.map((act) => ({
+        businessId: business.id,
+        activity: act,
+        isActive: true,
+      }));
+      if (activityRows.length > 0) {
+        const actInsert = tx.insert(businessActivities).values(activityRows);
+        if (typeof (actInsert as any)?.onConflictDoNothing === "function") {
+          await (actInsert as any).onConflictDoNothing();
+        } else {
+          await actInsert;
+        }
+      }
+
+      // 3. Insert default module configurations
+      const defaultModules = getDefaultModulesForSector(sector).map((modCode) => ({
+        businessId: business.id,
+        module: modCode,
+        isEnabled: true,
+        settings: {},
+      }));
+      if (defaultModules.length > 0) {
+        const modInsert = tx.insert(businessModuleConfigurations).values(defaultModules);
+        if (typeof (modInsert as any)?.onConflictDoNothing === "function") {
+          await (modInsert as any).onConflictDoNothing();
+        } else {
+          await modInsert;
+        }
+      }
+
+      // 4. Update user active businessId
       await tx
         .update(users)
         .set({
@@ -78,18 +156,24 @@ export class OnboardingController {
         })
         .where(eq(users.id, userId));
 
-      return business;
+      return {
+        business,
+        activities: chosenActivities,
+        modules: defaultModules.map((m) => m.module),
+      };
     });
 
     return {
       message: "Entreprise configurée avec succès",
       business: {
-        id: result.id,
-        name: result.name,
-        currency: result.currency,
-        phone: result.phone,
-        sector: result.sector,
-        address: result.address,
+        id: result.business.id,
+        name: result.business.name,
+        currency: result.business.currency,
+        phone: result.business.phone,
+        sector: result.business.sector,
+        address: result.business.address,
+        activities: result.activities,
+        modules: result.modules,
       },
       role: "OWNER",
     };

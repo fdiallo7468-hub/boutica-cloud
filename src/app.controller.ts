@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation, ApiProduces } from '@nestjs/swagger';
 import { Public } from '@thallesp/nestjs-better-auth';
 import type { Response } from 'express';
 import * as fs from 'fs';
+import * as path from 'path';
 
 @ApiTags('root')
 @Controller()

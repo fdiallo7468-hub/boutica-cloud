@@ -147,16 +147,6 @@ export function isValidCorsOrigin(origin: string, isProduction: boolean): { vali
   return { valid: true };
 }
 
-const optionalNovuValue = z.preprocess(
-  (value) => typeof value === 'string' && value.trim() === '' ? undefined : value,
-  z.string().trim().min(1).optional(),
-);
-
-const optionalNovuUrl = z.preprocess(
-  (value) => typeof value === 'string' && value.trim() === '' ? undefined : value,
-  z.string().url().optional(),
-);
-
 const rawEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -173,24 +163,9 @@ const rawEnvSchema = z.object({
   // Stockage Médias local zéro-coût
   UPLOADS_DIR: z.string().optional().default('./uploads'),
 
-  // Novu notification orchestration
-  NOVU_SECRET_KEY: optionalNovuValue,
-  NOVU_SERVER_URL: optionalNovuUrl,
-  NOVU_WORKFLOW_SALE_COMPLETED: optionalNovuValue,
-  NOVU_WORKFLOW_INVENTORY_LOW_STOCK: optionalNovuValue,
-  NOVU_WORKFLOW_INVENTORY_OUT_OF_STOCK: optionalNovuValue,
-
-  // Google Sign-In
-  GOOGLE_CLIENT_ID: z.string().optional(),
-  GOOGLE_CLIENT_SECRET: z.string().optional(),
-
-  // Apple Sign-In
-  APPLE_CLIENT_ID: z.string().optional(),
-  APPLE_CLIENT_SECRET: z.string().optional(),
-  APPLE_TEAM_ID: z.string().optional(),
-  APPLE_KEY_ID: z.string().optional(),
-  APPLE_PRIVATE_KEY: z.string().optional(),
-
+  // Phase 6: Novu Notification Engine
+  NOVU_API_KEY: z.string().optional(),
+  NOVU_BACKEND_URL: z.string().url().optional(),
   // Resend & Transactional Email
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().default('Boutica Cloud <notifications@boutica.cloud>'),
@@ -199,35 +174,6 @@ const rawEnvSchema = z.object({
   // Puppeteer & PDF Generation
   PUPPETEER_CACHE_DIR: z.string().optional(),
   PUPPETEER_EXECUTABLE_PATH: z.string().optional(),
-}).superRefine((raw, ctx) => {
-  const workflowKeys = [
-    'NOVU_WORKFLOW_SALE_COMPLETED',
-    'NOVU_WORKFLOW_INVENTORY_LOW_STOCK',
-    'NOVU_WORKFLOW_INVENTORY_OUT_OF_STOCK',
-  ] as const;
-  const hasNovuSettings = Boolean(
-    raw.NOVU_SERVER_URL || workflowKeys.some((key) => raw[key]),
-  );
-
-  if (!raw.NOVU_SECRET_KEY && hasNovuSettings) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['NOVU_SECRET_KEY'],
-      message: 'NOVU_SECRET_KEY is required when Novu settings are provided',
-    });
-  }
-
-  if (raw.NOVU_SECRET_KEY) {
-    for (const key of workflowKeys) {
-      if (!raw[key]) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: [key],
-          message: `${key} must match a workflow identifier configured in Novu`,
-        });
-      }
-    }
-  }
 });
 
 export const envSchema = rawEnvSchema.transform((raw, ctx) => {

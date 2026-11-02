@@ -5,8 +5,6 @@ import { DatabaseService } from '../../infrastructure/database/database';
 import { stock, stockMovements, variants } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { Tenant } from '../auth/tenant.type';
-import { enqueueNotificationEvent } from '../notifications/notification-outbox';
-import { getStockNotificationTransitions } from '../notifications/notification-events';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 
 @ApiTags('inventory')
@@ -32,7 +30,7 @@ export class InventoryController {
 
   @Post(':variantId/adjust')
   async adjust(@CurrentTenant() tenant: Tenant, @Param('variantId', ParseUUIDPipe) variantId: string, @Body() body: AdjustStockDto) {
-    const result = await this.db.db.transaction(async (tx) => {
+    return this.db.db.transaction(async (tx) => {
       const [variant] = await tx
         .select({ id: variants.id })
         .from(variants)
@@ -55,34 +53,17 @@ export class InventoryController {
 
       // FIX (P2-2): manual adjustments used to bypass stock_movements
       // entirely, silently breaking the audit trail the table exists for.
-      let movementId: string | undefined;
       if (delta !== 0) {
-        const [movement] = await tx.insert(stockMovements).values({
+        await tx.insert(stockMovements).values({
           businessId: tenant.businessId,
           variantId,
           type: 'ADJUSTMENT',
           quantity: delta,
           note: body.note,
-        }).returning({ id: stockMovements.id });
-        if (!movement) throw new Error('Stock movement insert did not return the created row');
-        movementId = movement.id;
-      }
-
-      if (movementId) {
-        const transitions = getStockNotificationTransitions(previousQuantity, body.quantity);
-        for (const eventType of transitions) {
-          await enqueueNotificationEvent(tx, {
-            businessId: tenant.businessId,
-            eventType,
-            deduplicationKey: `${tenant.businessId}:${eventType}:${movementId}`,
-            payload: { variantId, previousQuantity, quantity: body.quantity },
-          });
-        }
+        });
       }
 
       return updated;
     });
-
-    return result;
   }
 }

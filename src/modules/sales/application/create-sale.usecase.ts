@@ -5,11 +5,12 @@ import { DatabaseService } from '../../../infrastructure/database/database';
 import { businesses, idempotencyKeys, saleItems, sales, stock, stockMovements, variants } from '../../../infrastructure/database/schema';
 import { Money, Quantity } from '../../../common/domain';
 import { hashRequestPayload } from '../../../common/idempotency/idempotency.util';
-import { enqueueNotificationEvent } from '../../notifications/notification-outbox';
-import { getStockNotificationTransitions } from '../../notifications/notification-events';
 import { Tenant } from '../../auth/tenant.type';
 import { Sale, SaleItem } from '../domain/sale';
 import { CreateSaleDto } from '../dto/create-sale.dto';
+
+import { NotificationOutboxService } from '../../notifications/notification-outbox.service';
+import { NOVU_EVENT_TYPES } from '../../notifications/novu.types';
 
 const ENDPOINT = 'sales.create';
 
@@ -20,12 +21,15 @@ export interface CreateSaleResult {
 
 @Injectable()
 export class CreateSaleUseCase {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly outboxService: NotificationOutboxService,
+  ) {}
 
   async execute(tenant: Tenant, dto: CreateSaleDto, idempotencyKey: string | undefined): Promise<CreateSaleResult> {
     const requestHash = hashRequestPayload(dto);
 
-    const result = await this.db.db.transaction(async (tx) => {
+    return this.db.db.transaction(async (tx) => {
       if (idempotencyKey) {
         const [existing] = await tx
           .select()
@@ -92,12 +96,6 @@ export class CreateSaleUseCase {
           );
         }
       }
-      const stockTransitions = [...demandByVariant].flatMap(([variantId, demanded]) => {
-        const available = stockByVariant.get(variantId) ?? 0;
-        const quantity = available - demanded;
-        return getStockNotificationTransitions(available, quantity)
-          .map((eventType) => ({ eventType, variantId, available, quantity }));
-      });
 
       const saleId = randomUUID();
       const items: SaleItem[] = dto.items.map((item) => {
@@ -176,39 +174,21 @@ export class CreateSaleUseCase {
         });
       }
 
-      await enqueueNotificationEvent(tx, {
+      const responseBody = { ...saleRow, items: itemRows };
+
+      // Enqueue transactional outbox event for Novu
+      await this.outboxService.enqueue(tx, {
         businessId: tenant.businessId,
-        eventType: 'sale.completed',
-        deduplicationKey: `${tenant.businessId}:sale.completed:${saleId}`,
+        eventType: NOVU_EVENT_TYPES.SALE_COMPLETED,
+        deduplicationKey: `sale-completed-${saleId}`,
         payload: {
           saleId,
           total: total.toDecimalString(),
-          currency,
+          itemsCount: itemRows.length,
+          customerId: dto.customerId || null,
+          recipientId: tenant.userId,
         },
       });
-
-      const stockEventTypes = [...new Set(stockTransitions.map(({ eventType }) => eventType))];
-      for (const eventType of stockEventTypes) {
-        const affectedVariants = stockTransitions
-          .filter((transition) => transition.eventType === eventType)
-          .map(({ variantId, available, quantity }) => ({
-            variantId,
-            previousQuantity: available,
-            quantity,
-          }));
-        await enqueueNotificationEvent(tx, {
-          businessId: tenant.businessId,
-          eventType,
-          deduplicationKey: `${tenant.businessId}:${eventType}:${saleId}`,
-          payload: {
-            saleId,
-            variants: affectedVariants,
-            ...(affectedVariants.length === 1 ? affectedVariants[0] : {}),
-          },
-        });
-      }
-
-      const responseBody = { ...saleRow, items: itemRows };
 
       if (idempotencyKey) {
         // If a concurrent duplicate request reaches this insert at the same
@@ -229,7 +209,5 @@ export class CreateSaleUseCase {
 
       return { body: responseBody, replayed: false };
     });
-
-    return { body: result.body, replayed: result.replayed };
   }
 }

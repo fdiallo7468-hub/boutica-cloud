@@ -1,28 +1,57 @@
-import { Body, Controller, Delete, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { Tenant } from '../auth/tenant.type';
-import { PushDeviceDto } from './dto/push-device.dto';
-import { RemovePushDeviceDto } from './dto/remove-push-device.dto';
-import { PushNotificationsService } from './push-notifications.service';
+import { NotificationOutboxService } from './notification-outbox.service';
+import { NotificationOutboxWorker } from './notification-outbox.worker';
 
 @ApiTags('notifications')
-@Controller('api/v1/notifications/devices')
+@Controller('api/v1/notifications')
 export class NotificationsController {
-  constructor(private readonly pushNotifications: PushNotificationsService) {}
+  constructor(
+    private readonly outboxService: NotificationOutboxService,
+    private readonly outboxWorker: NotificationOutboxWorker,
+  ) {}
 
-  @Post()
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async register(@CurrentTenant() tenant: Tenant, @Body() input: PushDeviceDto): Promise<void> {
-    await this.pushNotifications.registerDevice(tenant, input);
+  /**
+   * Consulte la file d'attente d'événements outbox pour l'entreprise connectée.
+   */
+  @Get('outbox')
+  async listOutbox(
+    @CurrentTenant() tenant: Tenant,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.outboxService.listOutbox(tenant.businessId, {
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+      status,
+    });
   }
 
-  @Delete()
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(
+  /**
+   * Réessaie immédiatement l'envoi d'un événement outbox en échec.
+   */
+  @Post('outbox/:id/retry')
+  @HttpCode(HttpStatus.OK)
+  async retryEvent(
     @CurrentTenant() tenant: Tenant,
-    @Body() input: RemovePushDeviceDto,
-  ): Promise<void> {
-    await this.pushNotifications.removeDevice(tenant, input.token);
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.outboxService.retryEvent(tenant.businessId, id);
+  }
+
+  /**
+   * Déclenche immédiatement une passe de traitement du worker Outbox.
+   */
+  @Post('outbox/process')
+  @HttpCode(HttpStatus.OK)
+  async triggerProcessing(@CurrentTenant() _tenant: Tenant) {
+    const summary = await this.outboxWorker.processPendingEvents(50);
+    return {
+      message: 'Traitement du worker Outbox exécuté',
+      summary,
+    };
   }
 }

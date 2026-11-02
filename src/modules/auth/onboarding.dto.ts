@@ -1,4 +1,5 @@
-import { IsNotEmpty, IsOptional, IsString, Length, Matches } from "class-validator";
+import { IsArray, IsIn, IsNotEmpty, IsOptional, IsString, Length, Matches } from "class-validator";
+import { BUSINESS_SECTORS } from "../business/business-taxonomy";
 
 export class CompleteBusinessOnboardingDto {
   @IsString()
@@ -18,8 +19,15 @@ export class CompleteBusinessOnboardingDto {
 
   @IsOptional()
   @IsString()
-  @Length(2, 100)
+  @IsIn([BUSINESS_SECTORS.QUINCAILLERIE, BUSINESS_SECTORS.ELECTRONIQUE], {
+    message: "Le secteur d'activité doit être 'QUINCAILLERIE' ou 'ELECTRONIQUE'",
+  })
   businessSector?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  businessActivities?: string[];
 
   @IsOptional()
   @IsString()

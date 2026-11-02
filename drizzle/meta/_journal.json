@@ -15,27 +15,6 @@
       "when": 1792664919277,
       "tag": "0001_auth_evolution_business_user_fields",
       "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1793458682639,
-      "tag": "0002_cloudy_scarlet_spider",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1793489554329,
-      "tag": "0003_secret_tinkerer",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1793489943501,
-      "tag": "0004_clear_landau",
-      "breakpoints": true
     }
   ]
 }
