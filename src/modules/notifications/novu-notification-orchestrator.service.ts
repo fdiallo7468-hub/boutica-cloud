@@ -16,8 +16,9 @@ export class NovuNotificationOrchestrator {
   private readonly secretKey?: string;
 
   constructor(private readonly config: ConfigService<Env, true>) {
-    this.secretKey = this.config.get('NOVU_SECRET_KEY', { infer: true });
-    const serverURL = this.config.get('NOVU_SERVER_URL', { infer: true });
+    this.secretKey = this.config.get<string>('NOVU_SECRET_KEY', { infer: true }) || this.config.get<string>('NOVU_API_KEY', { infer: true });
+    const serverURL = (this.config.get<string>('NOVU_SERVER_URL', { infer: true }) || this.config.get<string>('NOVU_BACKEND_URL', { infer: true })) as string | undefined;
+
     if (this.secretKey) {
       this.client = new Novu({
         secretKey: this.secretKey,
@@ -50,15 +51,14 @@ export class NovuNotificationOrchestrator {
       throw new Error('Novu is not configured');
     }
 
-    const workflowId = this.config.get(getWorkflowConfigKey(event.eventType), { infer: true });
-    if (!workflowId) {
-      throw new Error(`Missing Novu workflow identifier for ${event.eventType}`);
-    }
+    const workflowKey = getWorkflowConfigKey(event.eventType);
+    const workflowId = (this.config.get(workflowKey as any, { infer: true }) as string) || event.eventType;
 
     const content = getNotificationContent(event);
+
     await this.client.trigger(
       {
-        workflowId,
+        workflowId: String(workflowId),
         to: {
           subscriberId: recipient.userId,
           channels: [{

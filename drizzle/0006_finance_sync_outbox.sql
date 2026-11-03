@@ -1,3 +1,12 @@
+-- Boutica Cloud: Relax constraints to accept uppercase and finance outbox events
+ALTER TABLE "notification_outbox" DROP CONSTRAINT IF EXISTS "notification_outbox_event_type_valid";
+--> statement-breakpoint
+ALTER TABLE "notification_outbox" DROP CONSTRAINT IF EXISTS "notification_outbox_status_valid";
+--> statement-breakpoint
+ALTER TABLE "notification_outbox" ADD CONSTRAINT "notification_outbox_status_valid" CHECK ("notification_outbox"."status" IN ('pending', 'processing', 'delivered', 'failed', 'PENDING', 'PROCESSING', 'DELIVERED', 'FAILED'));
+--> statement-breakpoint
+ALTER TABLE "notification_outbox" ADD CONSTRAINT "notification_outbox_event_type_valid" CHECK ("notification_outbox"."event_type" IN ('sale.completed', 'inventory.low_stock', 'inventory.out_of_stock', 'finance.receivable_created', 'finance.payment_received'));
+--> statement-breakpoint
 -- Boutica Cloud: Migration 0003 - Notification Outbox (Novu), Receivables & Payments, Offline Sync Engine
 -- Fully non-destructive, idempotent, and backward-compatible.
 

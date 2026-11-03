@@ -166,6 +166,11 @@ const rawEnvSchema = z.object({
   // Phase 6: Novu Notification Engine
   NOVU_API_KEY: z.string().optional(),
   NOVU_BACKEND_URL: z.string().url().optional(),
+  NOVU_SECRET_KEY: z.string().optional(),
+  NOVU_SERVER_URL: z.string().url().optional(),
+  NOVU_WORKFLOW_SALE_COMPLETED: z.string().optional(),
+  NOVU_WORKFLOW_INVENTORY_LOW_STOCK: z.string().optional(),
+  NOVU_WORKFLOW_INVENTORY_OUT_OF_STOCK: z.string().optional(),
   // Resend & Transactional Email
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().default('Boutica Cloud <notifications@boutica.cloud>'),

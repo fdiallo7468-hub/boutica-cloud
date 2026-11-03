@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Novu } from '@novu/node';
+import { Novu } from '@novu/api';
 import type { Env } from '../../config/env.schema';
 import { NovuEventType } from './novu.types';
 
@@ -11,21 +11,29 @@ export class NovuClientService {
   private readonly isConfigured: boolean = false;
 
   constructor(private readonly config: ConfigService<Env, true>) {
-    const apiKey = this.config.get<string>('NOVU_API_KEY', { infer: true });
-    const backendUrl = this.config.get<string>('NOVU_BACKEND_URL', { infer: true });
+    const apiKey =
+      this.config.get<string>('NOVU_SECRET_KEY', { infer: true }) ||
+      this.config.get<string>('NOVU_API_KEY', { infer: true });
+    const backendUrl =
+      this.config.get<string>('NOVU_SERVER_URL', { infer: true }) ||
+      this.config.get<string>('NOVU_BACKEND_URL', { infer: true });
 
     if (apiKey && typeof apiKey === 'string' && apiKey.trim() !== '') {
       try {
         const trimmedKey = apiKey.trim();
         const trimmedUrl = backendUrl && typeof backendUrl === 'string' ? backendUrl.trim() : undefined;
-        this.novu = new Novu(trimmedKey, trimmedUrl ? { backendUrl: trimmedUrl } : undefined);
+        this.novu = new Novu({
+          secretKey: trimmedKey,
+          ...(trimmedUrl ? { serverURL: trimmedUrl } : {}),
+          timeoutMs: 10_000,
+        });
         this.isConfigured = true;
-        this.logger.log('Client Novu initialisé avec succès');
+        this.logger.log('Client Novu (@novu/api v3) initialisé avec succès');
       } catch (err: any) {
         this.logger.error(`Erreur d'initialisation de Novu : ${err.message}`);
       }
     } else {
-      this.logger.warn('NOVU_API_KEY non configurée — Novu fonctionne en mode pass-through');
+      this.logger.warn('NOVU_SECRET_KEY / NOVU_API_KEY non configurée — Novu fonctionne en mode pass-through');
     }
   }
 
@@ -49,22 +57,25 @@ export class NovuClientService {
     }
 
     try {
-      const response = await this.novu.trigger(workflowId, {
-        to: {
-          subscriberId: recipientId,
+      const response = await this.novu.trigger(
+        {
+          workflowId,
+          to: {
+            subscriberId: recipientId,
+          },
+          payload: payload as any,
         },
-        payload: payload as any,
-        transactionId: deduplicationKey,
-      });
-
-      const data = response.data;
-      this.logger.log(
-        `[Novu] Événement '${workflowId}' accepté par Novu (transactionId: ${data?.transactionId || 'ok'})`,
+        deduplicationKey,
       );
 
+      const data = response as any;
+      const txId = data?.data?.transactionId || data?.transactionId || 'ok';
+      this.logger.log(
+        `[Novu] Événement '${workflowId}' accepté par Novu (transactionId: ${txId})`,
+      );
       return {
         success: true,
-        transactionId: data?.transactionId,
+        transactionId: txId,
       };
     } catch (err: any) {
       const errMsg = err?.response?.data?.message || err?.message || 'Erreur inconnue de transmission Novu';

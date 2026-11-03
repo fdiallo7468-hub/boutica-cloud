@@ -11,6 +11,7 @@ import { CreateSaleDto } from '../dto/create-sale.dto';
 
 import { NotificationOutboxService } from '../../notifications/notification-outbox.service';
 import { NOVU_EVENT_TYPES } from '../../notifications/novu.types';
+import { getStockNotificationTransitions } from '../../notifications/notification-events';
 
 const ENDPOINT = 'sales.create';
 
@@ -96,6 +97,13 @@ export class CreateSaleUseCase {
           );
         }
       }
+
+      const stockTransitions = [...demandByVariant].flatMap(([variantId, demanded]) => {
+        const available = stockByVariant.get(variantId) ?? 0;
+        const quantity = available - demanded;
+        return getStockNotificationTransitions(available, quantity)
+          .map((eventType) => ({ eventType, variantId, available, quantity }));
+      });
 
       const saleId = randomUUID();
       const items: SaleItem[] = dto.items.map((item) => {
@@ -189,6 +197,28 @@ export class CreateSaleUseCase {
           recipientId: tenant.userId,
         },
       });
+
+      const stockEventTypes = [...new Set(stockTransitions.map(({ eventType }) => eventType))];
+      for (const eventType of stockEventTypes) {
+        const affectedVariants = stockTransitions
+          .filter((transition) => transition.eventType === eventType)
+          .map(({ variantId, available, quantity }) => ({
+            variantId,
+            previousQuantity: available,
+            quantity,
+          }));
+        await this.outboxService.enqueue(tx, {
+          businessId: tenant.businessId,
+          eventType,
+          deduplicationKey: `${tenant.businessId}:${eventType}:${saleId}`,
+          payload: {
+            saleId,
+            variants: affectedVariants,
+            ...(affectedVariants.length === 1 ? affectedVariants[0] : {}),
+            recipientId: tenant.userId,
+          },
+        });
+      }
 
       if (idempotencyKey) {
         // If a concurrent duplicate request reaches this insert at the same

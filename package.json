@@ -28,7 +28,6 @@
     "@nestjs/schematics": "11.0.7",
     "@nestjs/swagger": "11.2.0",
     "@nestjs/throttler": "6.4.0",
-    "@novu/node": "^2.6.6",
     "@thallesp/nestjs-better-auth": "1.0.0",
     "@types/express": "5.0.3",
     "@types/multer": "^2.3.0",
@@ -46,7 +45,8 @@
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
     "typescript": "5.9.2",
-    "zod": "4.0.17"
+    "zod": "4.0.17",
+    "@novu/api": "^3.19.1"
   },
   "devDependencies": {
     "@nestjs/testing": "11.1.0",

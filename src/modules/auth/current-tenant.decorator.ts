@@ -7,15 +7,15 @@ import { Tenant, UserRole } from "./tenant.type";
 /**
  * Resolves the authenticated tenant context (userId, businessId, role).
  *
- * If a user is authenticated via OAuth (Google / Apple) but has not yet completed
- * the onboarding of their business, user.businessId is null. In this case,
- * access to multi-tenant resources is blocked with an explicit, structured
- * BUSINESS_ONBOARDING_REQUIRED error instructing the client to redirect the user
- * to the business onboarding screen.
+ * If an authenticated user has not yet completed the onboarding of their business,
+ * user.businessId is null. In this case, access to multi-tenant resources is blocked
+ * with an explicit, structured BUSINESS_ONBOARDING_REQUIRED error instructing the client
+ * to redirect the user to the business onboarding screen.
  */
 export const CurrentTenant = createParamDecorator(async (_data: unknown, ctx: ExecutionContext): Promise<Tenant> => {
   const req = ctx.switchToHttp().getRequest<Request>();
   const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
+
   if (!session) {
     throw new UnauthorizedException("Session authentifiée manquante");
   }

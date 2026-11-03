@@ -136,7 +136,7 @@ export class NotificationOutboxProcessor implements OnModuleInit, OnModuleDestro
         businessId: claimed.businessId,
         eventType: claimed.eventType as NotificationOutboxEvent['eventType'],
         deduplicationKey: claimed.deduplicationKey,
-        payload: claimed.payload,
+        payload: claimed.payload as any,
         attempts: claimed.attempts,
       };
     });

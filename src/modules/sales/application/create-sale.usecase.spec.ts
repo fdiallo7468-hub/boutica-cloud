@@ -81,7 +81,12 @@ describe('CreateSaleUseCase notification events', () => {
         transaction: jest.fn((callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx)),
       },
     } as unknown as DatabaseService;
-    const useCase = new CreateSaleUseCase(database);
+    const mockOutboxService = {
+      enqueue: jest.fn(async (_tx, event) => {
+        insertedEvents.push(event);
+      }),
+    } as any;
+    const useCase = new CreateSaleUseCase(database, mockOutboxService);
 
     const result = await useCase.execute(tenant, {
       items: [{ variantId, quantity: 1 }],
