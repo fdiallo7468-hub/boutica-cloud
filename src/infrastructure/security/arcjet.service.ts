@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { isIP } from 'node:net';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '../../config/env.schema';
 
@@ -70,6 +71,19 @@ export class ArcjetService implements OnModuleInit {
         reason: null,
       };
     }
-    return this.aj.protect(req);
+    // Render terminates the public connection at its trusted edge proxy. Express
+    // resolves req.ip using the single trusted proxy configured in main.ts.
+    // Pass that resolved address explicitly so Arcjet does not have to infer
+    // it again from headers that may be absent or normalized by the platform.
+    const resolvedIp = typeof req?.ip === 'string' ? req.ip.trim() : '';
+    const ipSrc = isIP(resolvedIp) ? resolvedIp : undefined;
+
+    if (!ipSrc) {
+      this.logger.warn(
+        `Arcjet could not resolve a trusted client IP (req.ip present: ${Boolean(resolvedIp)}; socket address present: ${Boolean(req?.socket?.remoteAddress)}).`,
+      );
+    }
+
+    return this.aj.protect(req, ipSrc ? { ipSrc } : undefined);
   }
 }
