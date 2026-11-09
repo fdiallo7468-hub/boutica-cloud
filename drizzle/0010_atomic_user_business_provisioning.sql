@@ -9,6 +9,14 @@ DECLARE
   created_business_id uuid;
   normalized_sector text;
 BEGIN
+  -- Backward-compatible rollout: the previous application version provisioned
+  -- the business in its Better Auth hook and supplied business_id here. Preserve
+  -- that already-created tenant during the migration-first deployment window.
+  IF NEW.business_id IS NOT NULL THEN
+    NEW.email := lower(btrim(NEW.email));
+    RETURN NEW;
+  END IF;
+
   IF NEW.business_name IS NULL OR length(btrim(NEW.business_name)) < 2 OR length(btrim(NEW.business_name)) > 120 THEN
     RAISE EXCEPTION 'A valid business name is required to create a Boutica account'
       USING ERRCODE = '23514';
