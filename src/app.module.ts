@@ -1,4 +1,6 @@
 import { StorageModule } from "./infrastructure/storage/storage.module";
+import { SecurityModule } from './infrastructure/security/security.module';
+import { ArcjetGuard } from './infrastructure/security/arcjet.guard';
 import { AppController } from "./app.controller";
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -64,10 +66,12 @@ import { SyncModule } from './modules/sync/sync.module';
     FinanceModule,
     SyncModule,
     StorageModule,
+    SecurityModule,
   ],
   controllers: [AppController],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: ArcjetGuard },
     { provide: APP_FILTER, useClass: DomainExceptionFilter },
   ],
 })
