@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, Injectable, Logger } from '@nestjs/common';
 import { and, eq, gt, or, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
 import {
@@ -314,7 +314,10 @@ export class SyncService {
                 }
               }
               const computedSubtotalCents = p.items.reduce((sum: number, item: any) => {
-                const unitPrice = Number(item?.unitPrice);
+                if (!item || typeof item.variantId !== 'string' || !Number.isSafeInteger(item.quantity) || item.quantity <= 0) {
+                  throw new BadRequestException('Each sale item requires a valid variant and a positive integer quantity');
+                }
+                const unitPrice = Number(item.unitPrice);
                 if (!Number.isFinite(unitPrice) || unitPrice < 0) {
                   throw new BadRequestException('Sale item unit prices must be finite non-negative numbers');
                 }
@@ -499,11 +502,11 @@ export class SyncService {
             entityId,
           });
         } catch (err: any) {
-          this.logger.error(`Erreur lors du traitement de l'opération ${op.clientOperationId} : ${err.message}`);
+          this.logger.warn(`Offline operation ${op.clientOperationId} rejected (${err instanceof Error ? err.name : 'UnknownError'})`);
           results.push({
             clientOperationId: op.clientOperationId,
             status: 'REJECTED',
-            error: err.message || 'Erreur interne de validation',
+            error: err instanceof HttpException ? err.message : 'Operation could not be processed',
           });
         }
       }
