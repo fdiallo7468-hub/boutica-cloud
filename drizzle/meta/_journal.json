@@ -71,6 +71,13 @@
       "when": 1794182402000,
       "tag": "0009_outbox_deduplication_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794182403000,
+      "tag": "0010_atomic_user_business_provisioning",
+      "breakpoints": true
     }
   ]
 }
