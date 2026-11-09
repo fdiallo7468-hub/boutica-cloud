@@ -135,6 +135,7 @@ export class NotificationOutboxWorker implements OnModuleInit, OnModuleDestroy {
             .update(notificationOutbox)
             .set({
               status: isFinalFailure ? 'FAILED' : 'PENDING',
+              attempts: event.attempts,
               availableAt: nextAttemptAt,
               lockedAt: null,
               lastError: errorMessage.slice(0, 1_000),
