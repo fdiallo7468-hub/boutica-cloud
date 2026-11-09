@@ -151,7 +151,10 @@ export class FinanceService {
             status: isSettled ? 'PAID' : 'PARTIALLY_PAID',
             updatedAt: new Date(),
           })
-          .where(eq(receivables.id, targetReceivable.id));
+          .where(and(
+            eq(receivables.id, targetReceivable.id),
+            eq(receivables.businessId, tenant.businessId),
+          ));
       }
 
       // 5. Enregistrer les événements d'outbox dans la transaction
