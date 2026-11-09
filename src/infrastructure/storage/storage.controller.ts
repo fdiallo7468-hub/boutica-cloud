@@ -114,7 +114,14 @@ export class StorageController {
     res.setHeader('Content-Type', fileInfo.mimeType);
     res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileInfo.filename)}"`);
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.sendFile(fileInfo.absolutePath);
+    res.setHeader('Cache-Control', 'private, no-store');
+    if (fileInfo.buffer) {
+      return res.status(200).send(fileInfo.buffer);
+    }
+    if (!fileInfo.absolutePath) {
+      throw new BadRequestException('Le stockage n’a pas retourné de contenu exploitable');
+    }
+    return res.sendFile(fileInfo.absolutePath);
   }
 
   @ApiOperation({ summary: 'Supprimer un média appartenant à son entreprise' })
