@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { randomUUID } from 'crypto';
+import { createHash, createHmac, randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Env } from '../../config/env.schema';
@@ -54,6 +54,13 @@ export class StorageService {
   private readonly logger = new Logger(StorageService.name);
   private readonly baseDir: string;
   private readonly publicBaseUrl: string | null;
+  private readonly objectStorage?: {
+    endpoint: URL;
+    bucket: string;
+    region: string;
+    accessKeyId: string;
+    secretAccessKey: string;
+  };
 
   constructor(private readonly config?: ConfigService<Env, true>) {
     const customDir = this.config?.get?.('UPLOADS_DIR' as any, { infer: true });
@@ -71,10 +78,131 @@ export class StorageService {
 
     const publicUrl = this.config?.get?.('BETTER_AUTH_URL' as any, { infer: true });
     this.publicBaseUrl = publicUrl ? publicUrl.replace(/\/+$/, '') : null;
+
+    const endpoint = this.config?.get?.('OBJECT_STORAGE_ENDPOINT' as any, { infer: true });
+    const bucket = this.config?.get?.('OBJECT_STORAGE_BUCKET' as any, { infer: true });
+    const region = this.config?.get?.('OBJECT_STORAGE_REGION' as any, { infer: true });
+    const accessKeyId = this.config?.get?.('OBJECT_STORAGE_ACCESS_KEY_ID' as any, { infer: true });
+    const secretAccessKey = this.config?.get?.('OBJECT_STORAGE_SECRET_ACCESS_KEY' as any, { infer: true });
+    const storageValues = [endpoint, bucket, region, accessKeyId, secretAccessKey];
+    if (storageValues.some(Boolean) && !storageValues.every((value) => typeof value === 'string' && value.trim())) {
+      throw new Error('Object storage configuration is incomplete; all OBJECT_STORAGE_* settings are required together.');
+    }
+    if (storageValues.every((value) => typeof value === 'string' && value.trim())) {
+      this.objectStorage = {
+        endpoint: new URL(endpoint),
+        bucket,
+        region,
+        accessKeyId,
+        secretAccessKey,
+      };
+      this.logger.log('S3-compatible durable object storage configured.');
+    } else {
+      this.logger.warn('Object storage is not configured; local filesystem storage is enabled for non-production use only.');
+    }
   }
 
   get configured(): boolean {
-    return true;
+    return Boolean(this.objectStorage) || this.config?.get?.('NODE_ENV' as any, { infer: true }) !== 'production';
+  }
+
+  private sha256(value: Buffer | string): string {
+    return createHash('sha256').update(value).digest('hex');
+  }
+
+  private hmac(key: Buffer | string, value: string): Buffer {
+    return createHmac('sha256', key).update(value).digest();
+  }
+
+  private encodeObjectPath(value: string): string {
+    return value.split('/').map((segment) => encodeURIComponent(segment).replace(/[!'()*]/g, (char) =>
+      `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+    )).join('/');
+  }
+
+  private async requestObjectStorage(method: 'GET' | 'PUT' | 'DELETE', key: string, body?: Buffer, mimeType?: string): Promise<Response> {
+    if (!this.objectStorage) {
+      throw new InternalServerErrorException('Durable object storage is not configured');
+    }
+
+    const config = this.objectStorage;
+    const now = new Date();
+    const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+    const dateStamp = amzDate.slice(0, 8);
+    const canonicalUri = `${config.endpoint.pathname.replace(/\/$/, '')}/${this.encodeObjectPath(config.bucket)}/${this.encodeObjectPath(key)}`;
+    const url = new URL(`${config.endpoint.origin}${canonicalUri}`);
+    const payloadHash = body ? this.sha256(body) : this.sha256('');
+    const headers: Record<string, string> = {
+      'x-amz-content-sha256': payloadHash,
+      'x-amz-date': amzDate,
+    };
+    if (mimeType) headers['content-type'] = mimeType;
+
+    const canonicalHeaderNames = Object.keys(headers).map((name) => name.toLowerCase()).concat('host').sort();
+    const canonicalHeaders = canonicalHeaderNames.map((name) => {
+      const value = name === 'host' ? url.host : headers[name];
+      return `${name}:${String(value).trim().replace(/\s+/g, ' ')}\n`;
+    }).join('');
+    const signedHeaders = canonicalHeaderNames.join(';');
+    const canonicalRequest = [
+      method,
+      canonicalUri,
+      '',
+      canonicalHeaders,
+      signedHeaders,
+      payloadHash,
+    ].join('\n');
+    const scope = `${dateStamp}/${config.region}/s3/aws4_request`;
+    const stringToSign = [
+      'AWS4-HMAC-SHA256',
+      amzDate,
+      scope,
+      this.sha256(canonicalRequest),
+    ].join('\n');
+
+    const kDate = this.hmac(`AWS4${config.secretAccessKey}`, dateStamp);
+    const kRegion = this.hmac(kDate, config.region);
+    const kService = this.hmac(kRegion, 's3');
+    const kSigning = this.hmac(kService, 'aws4_request');
+    const signature = createHmac('sha256', kSigning).update(stringToSign).digest('hex');
+    const authorization = `AWS4-HMAC-SHA256 Credential=${config.accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+    const requestHeaders: Record<string, string> = {
+      ...headers,
+      Authorization: authorization,
+    };
+    return fetch(url, {
+      method,
+      headers: requestHeaders,
+      ...(body ? { body } : {}),
+      signal: AbortSignal.timeout(20_000),
+    });
+  }
+
+  private async uploadObject(key: string, buffer: Buffer, mimeType: string): Promise<void> {
+    const response = await this.requestObjectStorage('PUT', key, buffer, mimeType);
+    if (!response.ok) {
+      this.logger.error(`Object storage upload failed with HTTP ${response.status}`);
+      throw new InternalServerErrorException('Unable to persist file in object storage');
+    }
+  }
+
+  private async readObject(key: string): Promise<Buffer> {
+    const response = await this.requestObjectStorage('GET', key);
+    if (response.status === 404) throw new NotFoundException('Le fichier demandé est introuvable');
+    if (!response.ok) {
+      this.logger.error(`Object storage download failed with HTTP ${response.status}`);
+      throw new InternalServerErrorException('Unable to retrieve file from object storage');
+    }
+    return Buffer.from(await response.arrayBuffer());
+  }
+
+  private async removeObject(key: string): Promise<void> {
+    const response = await this.requestObjectStorage('DELETE', key);
+    if (!response.ok && response.status !== 404) {
+      this.logger.error(`Object storage deletion failed with HTTP ${response.status}`);
+      throw new InternalServerErrorException('Unable to delete file from object storage');
+    }
   }
 
   getBaseDir(): string {
@@ -357,6 +485,19 @@ export class StorageService {
       key = this.buildKey(businessId, cleanFolder, filename);
     }
 
+    this.resolveSafeFilePath(businessId, key);
+    if (this.objectStorage) {
+      await this.uploadObject(key, buffer, mimeType);
+      const fileUrl = this.buildFileUrl(key);
+      return {
+        key,
+        url: fileUrl,
+        downloadUrl: fileUrl,
+        publicUrl: fileUrl,
+        size: buffer.length,
+      };
+    }
+
     const filePath = this.resolveSafeFilePath(businessId, key);
     const dir = path.dirname(filePath);
 
@@ -418,8 +559,17 @@ export class StorageService {
   async getFile(
     businessId: string,
     key: string,
-  ): Promise<{ absolutePath: string; mimeType: string; filename: string }> {
+  ): Promise<{ absolutePath?: string; buffer?: Buffer; mimeType: string; filename: string }> {
     const filePath = this.resolveSafeFilePath(businessId, key);
+    if (this.objectStorage) {
+      const buffer = await this.readObject(key);
+      const ext = this.getExtension(key);
+      return {
+        buffer,
+        mimeType: MIME_EXTENSION_MAP[ext] || 'application/octet-stream',
+        filename: path.basename(key),
+      };
+    }
 
     if (!fs.existsSync(filePath)) {
       throw new NotFoundException(`Le fichier '${key}' est introuvable sur le serveur`);
@@ -451,6 +601,10 @@ export class StorageService {
 
   async deleteFile(businessId: string, key: string): Promise<{ success: boolean }> {
     const filePath = this.resolveSafeFilePath(businessId, key);
+    if (this.objectStorage) {
+      await this.removeObject(key);
+      return { success: true };
+    }
 
     if (fs.existsSync(filePath)) {
       try {
