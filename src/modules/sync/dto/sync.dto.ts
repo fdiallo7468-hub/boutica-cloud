@@ -1,11 +1,16 @@
+import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
+  IsDateString,
   IsEnum,
+  IsIn,
   IsNotEmpty,
   IsObject,
   IsOptional,
   IsString,
   Length,
+  ValidateNested,
 } from 'class-validator';
 
 export enum DeviceTypeEnum {
@@ -36,14 +41,14 @@ export class RegisterDeviceDto {
 export class OfflineOperationItemDto {
   @IsString()
   @IsNotEmpty()
+  @Length(1, 128)
   clientOperationId!: string;
 
   @IsString()
-  @IsNotEmpty()
-  operationType!: string; // 'CREATE_CUSTOMER', 'CREATE_SALE', 'RECORD_PAYMENT', 'RECORD_EXPENSE', etc.
+  @IsIn(['CREATE_CUSTOMER', 'CREATE_SALE', 'RECORD_PAYMENT', 'RECORD_EXPENSE'])
+  operationType!: 'CREATE_CUSTOMER' | 'CREATE_SALE' | 'RECORD_PAYMENT' | 'RECORD_EXPENSE';
 
-  @IsString()
-  @IsNotEmpty()
+  @IsDateString()
   clientTimestamp!: string;
 
   @IsObject()
@@ -53,8 +58,12 @@ export class OfflineOperationItemDto {
 export class SyncPushDto {
   @IsString()
   @IsNotEmpty()
+  @Length(2, 100)
   deviceId!: string;
 
   @IsArray()
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => OfflineOperationItemDto)
   operations!: OfflineOperationItemDto[];
 }
