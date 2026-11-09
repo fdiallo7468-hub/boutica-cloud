@@ -55,7 +55,7 @@ describe('StorageService (Stockage Local Multi-Tenant Durci)', () => {
       const objectStorage = new StorageService(configService as any);
       const fetchMock = jest.spyOn(globalThis, 'fetch')
         .mockResolvedValueOnce(new Response(null, { status: 200 }))
-        .mockResolvedValueOnce(new Response(validPngBuffer, { status: 200 }))
+        .mockResolvedValueOnce(new Response(validPngBuffer as unknown as BodyInit, { status: 200 }))
         .mockResolvedValueOnce(new Response(null, { status: 204 }));
 
       const upload = await objectStorage.uploadDirect(
