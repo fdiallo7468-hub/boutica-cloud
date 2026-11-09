@@ -36,13 +36,14 @@ export class FinanceService {
    * Exécuté dans une transaction stricte avec génération de reçu unique
    * et émission d'un événement Outbox.
    */
-  async recordPayment(tenant: Tenant, dto: CreatePaymentDto) {
+  async recordPayment(tenant: Tenant, dto: CreatePaymentDto, transaction?: any) {
     if (dto.amount <= 0) {
       throw new BadRequestException('Le montant du paiement doit être strictement positif');
     }
 
     // 1. Vérification du client dans le périmètre de l'entreprise
-    const [customer] = await this.db.db
+    const executor = transaction ?? this.db.db;
+    const [customer] = await executor
       .select()
       .from(customers)
       .where(and(eq(customers.id, dto.customerId), eq(customers.businessId, tenant.businessId)));
@@ -53,7 +54,7 @@ export class FinanceService {
 
     const receiptNumber = `REC-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    return this.db.db.transaction(async (tx) => {
+    const execute = async (tx: any) => {
       let targetReceivable: typeof receivables.$inferSelect | null = null;
 
       // A supplied saleId must belong to this tenant and to the same customer.
@@ -192,7 +193,8 @@ export class FinanceService {
         customerName: customer.name,
         receivableSettled: isSettled,
       };
-    });
+    };
+    return transaction ? execute(transaction) : this.db.db.transaction(execute);
   }
 
   /**
