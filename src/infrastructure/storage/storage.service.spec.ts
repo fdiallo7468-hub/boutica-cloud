@@ -30,7 +30,7 @@ describe('StorageService (Cloudinary)', () => {
       expect(form.get('signature')).toEqual(expect.any(String));
       expect(String(input)).toContain('/image/upload');
       return new Response(JSON.stringify({
-        public_id:'businesses/biz-123/products/item.png',
+        public_id:'businesses/biz-123/products/item',
         secure_url:'https://res.cloudinary.com/boutica-test/image/upload/v1/item.png',
         bytes:png.length,
       }),{status:200,headers:{'content-type':'application/json'}});
