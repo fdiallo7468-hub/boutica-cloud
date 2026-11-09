@@ -83,8 +83,22 @@ export class OnboardingController {
     const address = dto.businessAddress?.trim() || null;
     const personalPhone = dto.personalPhone?.trim() || null;
 
-    // Run creation in a transactional block
+    // Lock and re-check the user inside the same transaction. This prevents
+    // two simultaneous onboarding requests from creating two businesses.
     const result = await this.db.db.transaction(async (tx) => {
+      const [lockedUser] = await tx
+        .select({ id: users.id, businessId: users.businessId })
+        .from(users)
+        .where(eq(users.id, userId))
+        .for('update');
+
+      if (!lockedUser) {
+        throw new UnauthorizedException("Utilisateur non trouvé en base");
+      }
+      if (lockedUser.businessId) {
+        throw new BadRequestException("Une entreprise est déjà rattachée à cet utilisateur");
+      }
+
       const [business] = await tx
         .insert(businesses)
         .values({
@@ -154,7 +168,8 @@ export class OnboardingController {
           personalPhone: personalPhone ?? undefined,
           updatedAt: new Date(),
         })
-        .where(eq(users.id, userId));
+        .where(eq(users.id, userId))
+        .returning({ id: users.id });
 
       return {
         business,
