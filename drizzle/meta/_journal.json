@@ -57,6 +57,13 @@
       "when": 1794182400000,
       "tag": "0007_notification_finance_event_types",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794182401000,
+      "tag": "0008_customer_supplier_archiving",
+      "breakpoints": true
     }
   ]
 }
