@@ -48,6 +48,26 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
       });
 
       // 2. Insert receivable
+      mockDb.db.select
+        .mockReturnValueOnce({
+          from: () => ({
+            where: () => ({
+              for: () => Promise.resolve([{
+                id: 'sale-1',
+                businessId: mockTenant.businessId,
+                customerId: mockCustomer.id,
+                total: '100000.00',
+                status: 'COMPLETED',
+              }]),
+            }),
+          }),
+        })
+        .mockReturnValueOnce({
+          from: () => ({
+            where: () => ({ limit: () => Promise.resolve([]) }),
+          }),
+        });
+
       mockDb.db.insert.mockReturnValueOnce({
         values: jest.fn().mockReturnValue({
           returning: jest.fn().mockResolvedValue([
@@ -87,6 +107,26 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
           where: () => Promise.resolve([mockCustomer]),
         }),
       });
+
+      mockDb.db.select
+        .mockReturnValueOnce({
+          from: () => ({
+            where: () => ({
+              for: () => Promise.resolve([{
+                id: 'sale-2',
+                businessId: mockTenant.businessId,
+                customerId: mockCustomer.id,
+                total: '100000.00',
+                status: 'COMPLETED',
+              }]),
+            }),
+          }),
+        })
+        .mockReturnValueOnce({
+          from: () => ({
+            where: () => ({ limit: () => Promise.resolve([]) }),
+          }),
+        });
 
       mockDb.db.insert.mockReturnValueOnce({
         values: jest.fn().mockReturnValue({
