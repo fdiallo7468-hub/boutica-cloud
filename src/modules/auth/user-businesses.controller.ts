@@ -12,6 +12,16 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { fromNodeHeaders } from "better-auth/node";
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsIn,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Length,
+  Matches,
+} from "class-validator";
 import { and, eq } from "drizzle-orm";
 import type { Request } from "express";
 import { auth } from "../../auth/auth";
@@ -32,15 +42,42 @@ import {
 } from "../business/business-taxonomy";
 
 export class SwitchBusinessDto {
+  @IsString()
+  @IsNotEmpty()
+  @Length(1, 64)
   businessId!: string;
 }
 
 export class CreateAdditionalBusinessDto {
+  @IsString()
+  @IsNotEmpty()
+  @Length(2, 120)
   businessName!: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Z]{3}$/i)
   currency?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 30)
   phone?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn([BUSINESS_SECTORS.QUINCAILLERIE, BUSINESS_SECTORS.ELECTRONIQUE])
   businessSector?: BusinessSectorType;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
   businessActivities?: string[];
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 250)
   address?: string;
 }
 
