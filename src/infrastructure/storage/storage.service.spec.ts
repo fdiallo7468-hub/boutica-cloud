@@ -25,10 +25,68 @@ describe('StorageService (Stockage Local Multi-Tenant Durci)', () => {
     storageService = new StorageService(configService as any);
   });
 
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   afterAll(async () => {
     if (fs.existsSync(testDir)) {
       await fs.promises.rm(testDir, { recursive: true, force: true });
     }
+  });
+
+  describe('S3-compatible durable object storage', () => {
+    it('signs uploads and reads/deletes media through the object storage endpoint', async () => {
+      const configService = {
+        get: jest.fn().mockImplementation((key: string) => {
+          const values: Record<string, string> = {
+            UPLOADS_DIR: testDir,
+            BETTER_AUTH_URL: 'https://boutica.cloud',
+            NODE_ENV: 'test',
+            OBJECT_STORAGE_ENDPOINT: 'https://objects.example.test',
+            OBJECT_STORAGE_BUCKET: 'boutica-media',
+            OBJECT_STORAGE_REGION: 'auto',
+            OBJECT_STORAGE_ACCESS_KEY_ID: 'test-access-key',
+            OBJECT_STORAGE_SECRET_ACCESS_KEY: 'test-secret-key',
+          };
+          return values[key];
+        }),
+      };
+      const objectStorage = new StorageService(configService as any);
+      const fetchMock = jest.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(new Response(null, { status: 200 }))
+        .mockResolvedValueOnce(new Response(validPngBuffer, { status: 200 }))
+        .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+      const upload = await objectStorage.uploadDirect(
+        'tenant-object-store',
+        'products',
+        'image.png',
+        validPngBuffer,
+        'image/png',
+      );
+
+      expect(upload.key).toContain('businesses/tenant-object-store/products/');
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        1,
+        expect.stringContaining('/boutica-media/businesses/tenant-object-store/products/'),
+        expect.objectContaining({
+          method: 'PUT',
+          headers: expect.objectContaining({
+            Authorization: expect.stringContaining('AWS4-HMAC-SHA256'),
+            'x-amz-content-sha256': expect.any(String),
+            'x-amz-date': expect.any(String),
+          }),
+        }),
+      );
+
+      const downloaded = await objectStorage.getFile('tenant-object-store', upload.key);
+      expect(downloaded.buffer).toEqual(validPngBuffer);
+      expect(downloaded.mimeType).toBe('image/png');
+
+      await expect(objectStorage.deleteFile('tenant-object-store', upload.key)).resolves.toEqual({ success: true });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
   });
 
   describe('Contrat d Upload Cohérent (getPresignedUploadUrl & uploadDirect)', () => {
@@ -61,7 +119,7 @@ describe('StorageService (Stockage Local Multi-Tenant Durci)', () => {
       // 4. Lecture immédiate avec la même clé
       const fileInfo = await storageService.getFile('tenant-mobile', presigned.key);
       expect(fileInfo.mimeType).toBe('image/png');
-      expect(Boolean(fileInfo.absolutePath && fs.existsSync(fileInfo.absolutePath))).toBe(true);
+      expect(Boolean(fileInfo.absolutePath && Boolean(fileInfo.absolutePath && fs.existsSync(fileInfo.absolutePath)))).toBe(true);
     });
 
     it('devrait refuser qu un client fournisse une expectedKey appartenant à un autre tenant', async () => {
