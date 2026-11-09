@@ -1,5 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { eq, sql } from 'drizzle-orm';
+import { businesses, businessActivities, businessMembers, businessModuleConfigurations } from '../../src/infrastructure/database/schema';
 import { createTestApp, registerBusiness, resetDatabase } from '../utils/test-app';
 import { DatabaseService } from '../../src/infrastructure/database/database';
 
@@ -27,6 +29,39 @@ describe('Auth (e2e)', () => {
       .get('/api/v1/products')
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(200);
+  });
+
+  it('creates the business, owner membership, activities and modules with the user row', async () => {
+    const { businessId } = await registerBusiness(app, 'Atomic Provisioning Shop');
+
+    const [business] = await db.db.select().from(businesses).where(eq(businesses.id, businessId));
+    const memberships = await db.db.select().from(businessMembers).where(eq(businessMembers.businessId, businessId));
+    const activities = await db.db.select().from(businessActivities).where(eq(businessActivities.businessId, businessId));
+    const modules = await db.db.select().from(businessModuleConfigurations).where(eq(businessModuleConfigurations.businessId, businessId));
+
+    expect(business?.name).toContain('Atomic Provisioning Shop');
+    expect(memberships).toHaveLength(1);
+    expect(memberships[0]?.role).toBe('OWNER');
+    expect(activities).toHaveLength(6);
+    expect(modules.length).toBeGreaterThan(0);
+  });
+
+  it('rolls back business provisioning if the user insert violates a database constraint', async () => {
+    const email = `rollback-${Date.now()}@example.test`;
+    await request(app.getHttpServer())
+      .post('/api/auth/sign-up/email')
+      .send({ name: 'Original Owner', email, password: 'a-very-long-password-123', businessName: 'Original Shop' })
+      .expect((res) => {
+        if (res.status >= 400) throw new Error(`first sign-up unexpectedly failed: ${JSON.stringify(res.body)}`);
+      });
+
+    await expect(db.db.execute(sql`
+      INSERT INTO users (id, name, email, business_name, business_currency, business_sector, role)
+      VALUES ('failed-trigger-user', 'Failed Owner', ${email}, 'Must Roll Back Shop', 'XOF', 'QUINCAILLERIE', 'OWNER')
+    `)).rejects.toBeDefined();
+
+    const orphaned = await db.db.select().from(businesses).where(eq(businesses.name, 'Must Roll Back Shop'));
+    expect(orphaned).toHaveLength(0);
   });
 
   it('rejects sign-up with an email that is already registered', async () => {
