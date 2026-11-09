@@ -279,9 +279,11 @@ export class FinanceService {
    * Crée une créance liée à une vente (mode partiel ou différé).
    */
   async createReceivableForSale(tenant: Tenant, dto: CreateReceivableFromSaleDto) {
-    const remainingBalance = dto.totalAmount - dto.amountPaidNow;
-    if (remainingBalance <= 0) {
-      throw new BadRequestException('Une créance ne peut être créée que si le solde restant est strictement positif');
+    if (!Number.isFinite(dto.totalAmount) || dto.totalAmount <= 0) {
+      throw new BadRequestException('Le montant total de la vente doit être positif');
+    }
+    if (!Number.isFinite(dto.amountPaidNow) || dto.amountPaidNow < 0) {
+      throw new BadRequestException('Le montant déjà payé ne peut pas être négatif');
     }
 
     const [customer] = await this.db.db
@@ -293,17 +295,66 @@ export class FinanceService {
       throw new NotFoundException('Un client identifié est obligatoire pour une vente à crédit');
     }
 
-    const status = dto.amountPaidNow > 0 ? 'PARTIALLY_PAID' : 'PENDING';
     const dueDate = dto.dueDate ? new Date(dto.dueDate) : null;
+    if (dueDate && Number.isNaN(dueDate.getTime())) {
+      throw new BadRequestException('La date d’échéance est invalide');
+    }
 
     return this.db.db.transaction(async (tx) => {
+      // The sale is the source of truth for tenant, customer and total. Lock it
+      // so concurrent requests cannot create multiple receivables for one sale.
+      const [sale] = await tx
+        .select()
+        .from(sales)
+        .where(and(
+          eq(sales.id, dto.saleId),
+          eq(sales.businessId, tenant.businessId),
+        ))
+        .for('update');
+
+      if (!sale) {
+        throw new NotFoundException('Vente introuvable pour cette entreprise');
+      }
+      if (sale.status !== 'COMPLETED') {
+        throw new BadRequestException('Une créance ne peut être créée que pour une vente terminée');
+      }
+      if (!sale.customerId || sale.customerId !== dto.customerId) {
+        throw new BadRequestException('Le client de la créance doit correspondre au client de la vente');
+      }
+
+      const totalAmount = Number(sale.total);
+      if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+        throw new BadRequestException('Le total de la vente est invalide');
+      }
+      if (Math.round(dto.totalAmount * 100) !== Math.round(totalAmount * 100)) {
+        throw new BadRequestException('Le montant total fourni ne correspond pas au total enregistré de la vente');
+      }
+      if (dto.amountPaidNow >= totalAmount) {
+        throw new BadRequestException('Le montant déjà payé doit être inférieur au total de la vente');
+      }
+
+      const [existingReceivable] = await tx
+        .select({ id: receivables.id })
+        .from(receivables)
+        .where(and(
+          eq(receivables.saleId, sale.id),
+          eq(receivables.businessId, tenant.businessId),
+        ))
+        .limit(1);
+      if (existingReceivable) {
+        throw new ConflictException('Une créance existe déjà pour cette vente');
+      }
+
+      const remainingBalance = totalAmount - dto.amountPaidNow;
+      const status = dto.amountPaidNow > 0 ? 'PARTIALLY_PAID' : 'PENDING';
+
       const [receivable] = await tx
         .insert(receivables)
         .values({
           businessId: tenant.businessId,
           customerId: dto.customerId,
-          saleId: dto.saleId,
-          initialAmount: dto.totalAmount.toFixed(2),
+          saleId: sale.id,
+          initialAmount: totalAmount.toFixed(2),
           paidAmount: dto.amountPaidNow.toFixed(2),
           remainingBalance: remainingBalance.toFixed(2),
           dueDate,
