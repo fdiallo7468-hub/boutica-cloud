@@ -64,6 +64,13 @@
       "when": 1794182401000,
       "tag": "0008_customer_supplier_archiving",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794182402000,
+      "tag": "0009_outbox_deduplication_unique",
+      "breakpoints": true
     }
   ]
 }
