@@ -473,7 +473,7 @@ export const notificationOutbox = pgTable(
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
   },
   (t) => ({
-    deduplicationKeyIdx: index('notification_outbox_dedup_idx').on(t.deduplicationKey),
+    deduplicationKeyUnique: uniqueIndex('notification_outbox_business_dedup_unique').on(t.businessId, t.deduplicationKey),
     statusIdx: index('notification_outbox_status_idx').on(t.status),
     availableAtIdx: index('notification_outbox_available_at_idx').on(t.availableAt),
     businessIdx: index('notification_outbox_business_idx').on(t.businessId),
