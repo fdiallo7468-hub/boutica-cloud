@@ -19,9 +19,9 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   readonly pool: Pool;
   readonly db: NodePgDatabase<typeof schema>;
 
-  constructor(config: ConfigService) {
+  constructor(private readonly config: ConfigService) {
     this.pool = new Pool({
-      connectionString: config.get<string>('DATABASE_URL'),
+      connectionString: this.config.get<string>('DATABASE_URL'),
       max: 10,
       idleTimeoutMillis: 30_000,
     });
@@ -50,8 +50,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   }
 
   private configIsProduction(): boolean {
-    return this.pool.options.connectionString !== undefined &&
-      process.env.NODE_ENV === 'production';
+    return this.config.get<string>('NODE_ENV') === 'production';
   }
 
   async onModuleDestroy(): Promise<void> {
