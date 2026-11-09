@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { bearer } from "better-auth/plugins";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { envSchema } from "../config/env.schema";
@@ -205,6 +206,26 @@ export const auth = betterAuth({
               role: "OWNER",
             },
           };
+        },
+        after: async (user) => {
+          // The PostgreSQL trigger writes business_id during INSERT. Better Auth's
+          // create-user result may be assembled from the pre-insert input object,
+          // so reload the persisted tenant fields before the sign-up response and
+          // session are produced.
+          const [persistedUser] = await db
+            .select({ businessId: users.businessId, role: users.role })
+            .from(users)
+            .where(eq(users.id, user.id))
+            .limit(1);
+
+          if (!persistedUser?.businessId) {
+            throw new Error('Atomic business provisioning did not produce a business_id');
+          }
+
+          Object.assign(user, {
+            businessId: persistedUser.businessId,
+            role: persistedUser.role,
+          });
         },
       },
     },
