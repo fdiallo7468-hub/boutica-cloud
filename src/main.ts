@@ -20,6 +20,8 @@ async function bootstrap() {
   // see the current Better Auth NestJS integration docs, which document
   // this exact ordering requirement.
   const app = await NestFactory.create(AppModule, { bodyParser: false });
+  // Ensure SIGTERM/SIGINT close Nest providers cleanly (notably PostgreSQL pools).
+  app.enableShutdownHooks();
   const logger = new Logger('Bootstrap');
 
   const expressApp = app.getHttpAdapter().getInstance();
