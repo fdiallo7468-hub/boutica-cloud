@@ -52,11 +52,11 @@ export class ReceivePurchaseUseCase {
       // pattern as the variant ownership check below.
       if (dto.supplierId) {
         const [supplier] = await tx
-          .select({ id: suppliers.id })
+          .select({ id: suppliers.id, isActive: suppliers.isActive })
           .from(suppliers)
           .where(and(eq(suppliers.id, dto.supplierId), eq(suppliers.businessId, tenant.businessId)));
-        if (!supplier) {
-          throw new BadRequestException('Supplier does not exist or does not belong to this business');
+        if (!supplier || !supplier.isActive) {
+          throw new BadRequestException('Supplier does not exist, is archived, or does not belong to this business');
         }
       }
 
