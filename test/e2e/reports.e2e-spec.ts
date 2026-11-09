@@ -45,7 +45,7 @@ describe('Reports (e2e)', () => {
     expect(res.body.expensesTotal).toBe('10.00');
     expect(res.body.estimatedProfit).toBe('30.00'); // (25-15)*4 - 10
     expect(res.body.stockValue).toBe('240.00'); // (20-4) remaining * 15 cost
-    expect(res.body.receivables).toBeNull();
+    expect(res.body.receivables).toMatchObject({ activeCount: 0, totalOutstanding: '0.00', overdueAmount: '0.00' });
     expect(res.body.recentSales).toHaveLength(1);
     expect(res.body.topProducts).toHaveLength(1);
     expect(res.body.topProducts[0]).toMatchObject({ variantId, quantitySold: 4 });
@@ -115,7 +115,7 @@ describe('Reports (e2e)', () => {
       .expect(201);
 
     // The purchase price triples AFTER the sale.
-    await db.db.update(variants).set({ purchasePrice: '30.00' }).where(eq(variants.id, variantId));
+    await db.db.update(variants).set({ purchasePrice: '30.00', sellingPrice: '35.00' }).where(eq(variants.id, variantId));
 
     const res = await request(app.getHttpServer())
       .get('/api/v1/reports/dashboard')
