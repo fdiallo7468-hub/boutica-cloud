@@ -67,18 +67,16 @@ describe('StorageService (Stockage Local Multi-Tenant Durci)', () => {
       );
 
       expect(upload.key).toContain('businesses/tenant-object-store/products/');
-      expect(fetchMock).toHaveBeenNthCalledWith(
-        1,
-        expect.stringContaining('/boutica-media/businesses/tenant-object-store/products/'),
-        expect.objectContaining({
-          method: 'PUT',
-          headers: expect.objectContaining({
-            Authorization: expect.stringContaining('AWS4-HMAC-SHA256'),
-            'x-amz-content-sha256': expect.any(String),
-            'x-amz-date': expect.any(String),
-          }),
+      const firstRequest = fetchMock.mock.calls[0]!;
+      expect(String(firstRequest[0])).toContain('/boutica-media/businesses/tenant-object-store/products/');
+      expect(firstRequest[1]).toEqual(expect.objectContaining({
+        method: 'PUT',
+        headers: expect.objectContaining({
+          Authorization: expect.stringContaining('AWS4-HMAC-SHA256'),
+          'x-amz-content-sha256': expect.any(String),
+          'x-amz-date': expect.any(String),
         }),
-      );
+      }));
 
       const downloaded = await objectStorage.getFile('tenant-object-store', upload.key);
       expect(downloaded.buffer).toEqual(validPngBuffer);
