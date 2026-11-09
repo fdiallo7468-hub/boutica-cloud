@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { CanActivate, ExecutionContext, HttpException, HttpStatus, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ArcjetService } from './arcjet.service';
 
 @Injectable()
@@ -7,6 +7,9 @@ export class ArcjetGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     if (!this.arcjetService.enabled) {
+      if (this.arcjetService.production) {
+        throw new ServiceUnavailableException('Application protection is unavailable');
+      }
       return true;
     }
 
@@ -20,6 +23,13 @@ export class ArcjetGuard implements CanActivate {
 
     try {
       const decision = await this.arcjetService.protect(req);
+
+      if (decision && typeof decision.isErrored === 'function' && decision.isErrored()) {
+        if (this.arcjetService.production) {
+          throw new ServiceUnavailableException('Application protection could not evaluate this request');
+        }
+        return true;
+      }
 
       if (decision && typeof decision.isDenied === 'function' && decision.isDenied()) {
         const reason = decision.reason;
@@ -56,7 +66,10 @@ export class ArcjetGuard implements CanActivate {
       if (err instanceof HttpException) {
         throw err;
       }
-      // Fail-open contrôlé en cas d'erreur de communication avec le réseau externe Arcjet
+      // Development may continue without a remote decision; production fails closed.
+      if (this.arcjetService.production) {
+        throw new ServiceUnavailableException('Application protection is temporarily unavailable');
+      }
       return true;
     }
 
