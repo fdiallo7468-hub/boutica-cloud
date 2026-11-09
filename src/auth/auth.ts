@@ -27,6 +27,18 @@ const pool = new Pool({
   ...(useSsl ? { ssl: { rejectUnauthorized: env.NODE_ENV === "production" } } : {}),
 });
 const db = drizzle(pool, { schema: { users, sessions, accounts, verifications, businesses, businessActivities, businessModuleConfigurations, businessMembers } });
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "\"": "&quot;",
+      "'": "&#39;",
+    };
+    return entities[character] ?? character;
+  });
+}
 
 export const auth = betterAuth({
   secret: env.BETTER_AUTH_SECRET,
@@ -57,51 +69,52 @@ export const auth = betterAuth({
     autoSignIn: true,
     resetPasswordTokenExpiresIn: 3600, // 1 hour expiration
     sendResetPassword: async ({ user, url, token }) => {
+      if (!env.RESEND_API_KEY) {
+        // Never write reset tokens or reset URLs to logs, including in development.
+        throw new Error("Password reset email provider is not configured");
+      }
+
       const resetLink = env.RESET_PASSWORD_URL
-        ? `${env.RESET_PASSWORD_URL}?token=${encodeURIComponent(token)}`
+        ? (() => {
+            const target = new URL(env.RESET_PASSWORD_URL);
+            target.searchParams.set("token", token);
+            return target.toString();
+          })()
         : url;
 
-      if (env.RESEND_API_KEY) {
-        try {
-          const res = await fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${env.RESEND_API_KEY}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              from: env.EMAIL_FROM,
-              to: [user.email],
-              subject: "Réinitialisation de votre mot de passe Boutica Cloud",
-              html: `
-                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
-                  <h2 style="color: #0f172a; margin-bottom: 16px;">Réinitialisation de votre mot de passe</h2>
-                  <p>Bonjour ${user.name || ""},</p>
-                  <p>Une demande de réinitialisation de mot de passe a été initiée pour votre compte Boutica Cloud.</p>
-                  <p>Ce lien est à usage unique et reste valide pendant <strong>1 heure</strong> :</p>
-                  <div style="margin: 28px 0;">
-                    <a href="${resetLink}" style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block;">
-                      Réinitialiser mon mot de passe
-                    </a>
-                  </div>
-                  <p style="color: #64748b; font-size: 13px; line-height: 1.5;">
-                    Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet e-mail. Votre mot de passe actuel reste inchangé.
-                  </p>
-                </div>
-              `,
-            }),
-          });
-          if (!res.ok) {
-            const err = await res.text();
-            console.error("[Auth/Resend] Échec d'envoi de l'e-mail:", err);
-          } else {
-            console.log(`[Auth/Resend] E-mail de réinitialisation envoyé avec succès à ${user.email}`);
-          }
-        } catch (err) {
-          console.error("[Auth/Resend] Erreur de communication avec l'API Resend:", err);
-        }
-      } else {
-        console.log(`[Auth/Resend] Simulation d'envoi (RESEND_API_KEY absent) pour ${user.email} -> ${resetLink}`);
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.RESEND_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        signal: AbortSignal.timeout(10_000),
+        body: JSON.stringify({
+          from: env.EMAIL_FROM,
+          to: [user.email],
+          subject: "Réinitialisation de votre mot de passe Boutica Cloud",
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b;">
+              <h2 style="color: #0f172a; margin-bottom: 16px;">Réinitialisation de votre mot de passe</h2>
+              <p>Bonjour ${escapeHtml(user.name || "")},</p>
+              <p>Une demande de réinitialisation de mot de passe a été initiée pour votre compte Boutica Cloud.</p>
+              <p>Ce lien est à usage unique et reste valide pendant <strong>1 heure</strong> :</p>
+              <div style="margin: 28px 0;">
+                <a href="${escapeHtml(resetLink)}" style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block;">
+                  Réinitialiser mon mot de passe
+                </a>
+              </div>
+              <p style="color: #64748b; font-size: 13px; line-height: 1.5;">
+                Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet e-mail. Votre mot de passe actuel reste inchangé.
+              </p>
+            </div>
+          `,
+        }),
+      });
+
+      if (!res.ok) {
+        // Do not log provider response bodies: they may contain recipient or request details.
+        throw new Error(`Password reset email delivery failed (HTTP ${res.status})`);
       }
     },
   },
