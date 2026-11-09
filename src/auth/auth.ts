@@ -5,7 +5,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { envSchema } from "../config/env.schema";
 import { accounts, businesses, businessActivities, businessMembers, businessModuleConfigurations, sessions, users, verifications } from "../infrastructure/database/schema";
-import { BUSINESS_SECTORS, BusinessSectorType, getDefaultModulesForSector, SECTOR_ACTIVITIES } from "../modules/business/business-taxonomy";
+import { BUSINESS_SECTORS } from "../modules/business/business-taxonomy";
 
 /**
  * v2.3 — Better Auth instance for Boutica Cloud.
