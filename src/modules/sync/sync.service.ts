@@ -278,7 +278,7 @@ export class SyncService {
 
           // Isolate each operation with a PostgreSQL savepoint so one rejected item
           // cannot poison the transaction for the rest of the batch.
-          await operationTx.transaction(async (operationTx) => {
+          await tx.transaction(async (operationTx) => {
 
           // 2. Exécution selon le type d'opération
           switch (op.operationType) {
