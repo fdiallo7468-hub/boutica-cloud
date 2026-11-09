@@ -8,6 +8,12 @@ describe('envSchema Validation & Security', () => {
     BETTER_AUTH_SECRET: 'production_super_secure_random_key_with_high_entropy_12345!',
     BETTER_AUTH_URL: 'https://boutica-cloud.onrender.com',
     CORS_ORIGIN: 'https://boutica-cloud.onrender.com,https://app.boutica.cloud',
+    ARCJET_KEY: 'ajkey_ci_test_production_123456789',
+    OBJECT_STORAGE_ENDPOINT: 'https://objects.example.test',
+    OBJECT_STORAGE_BUCKET: 'boutica-production-media',
+    OBJECT_STORAGE_REGION: 'auto',
+    OBJECT_STORAGE_ACCESS_KEY_ID: 'object-storage-access-key',
+    OBJECT_STORAGE_SECRET_ACCESS_KEY: 'object-storage-secret-key',
   };
 
   describe('isPrivateOrDangerousHost Helper', () => {
@@ -105,6 +111,24 @@ describe('envSchema Validation & Security', () => {
       if (!result.success) {
         const issue = result.error.issues.find((i) => i.path.includes('CORS_ORIGIN'));
         expect(issue?.message).toContain('wildcard "*" est interdit');
+      }
+    });
+
+    it('requires Arcjet protection in production', () => {
+      const { ARCJET_KEY, ...withoutArcjet } = validProductionEnv;
+      const result = envSchema.safeParse(withoutArcjet);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some((issue) => issue.path.includes('ARCJET_KEY'))).toBe(true);
+      }
+    });
+
+    it('requires S3-compatible durable storage in production', () => {
+      const { OBJECT_STORAGE_SECRET_ACCESS_KEY, ...withoutObjectStorageSecret } = validProductionEnv;
+      const result = envSchema.safeParse(withoutObjectStorageSecret);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some((issue) => issue.path.includes('OBJECT_STORAGE_SECRET_ACCESS_KEY'))).toBe(true);
       }
     });
 
