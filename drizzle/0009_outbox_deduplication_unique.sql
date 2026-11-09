@@ -18,5 +18,8 @@ WHERE target.id = ranked.id
 --> statement-breakpoint
 DROP INDEX IF EXISTS "notification_outbox_dedup_idx";
 --> statement-breakpoint
+-- Retire the legacy global constraint: deduplication is scoped to each business.
+DROP INDEX IF EXISTS "notification_outbox_deduplication_unique";
+--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "notification_outbox_business_dedup_unique"
   ON "notification_outbox" ("business_id", "deduplication_key");
