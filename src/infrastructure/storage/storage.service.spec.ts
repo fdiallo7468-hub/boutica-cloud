@@ -61,7 +61,7 @@ describe('StorageService (Stockage Local Multi-Tenant Durci)', () => {
       // 4. Lecture immédiate avec la même clé
       const fileInfo = await storageService.getFile('tenant-mobile', presigned.key);
       expect(fileInfo.mimeType).toBe('image/png');
-      expect(fs.existsSync(fileInfo.absolutePath)).toBe(true);
+      expect(Boolean(fileInfo.absolutePath && fs.existsSync(fileInfo.absolutePath))).toBe(true);
     });
 
     it('devrait refuser qu un client fournisse une expectedKey appartenant à un autre tenant', async () => {
