@@ -315,6 +315,11 @@ export class StorageService {
     return fullPath;
   }
 
+  private resolveCanonicalKey(businessId: string, key: string): string {
+    const safePath = this.resolveSafeFilePath(businessId, key);
+    return path.relative(this.baseDir, safePath).split(path.sep).join('/');
+  }
+
   private validateMimeType(mimeType: string): void {
     if (!ALLOWED_MIME_TYPES.includes(mimeType as any)) {
       throw new BadRequestException(
@@ -485,9 +490,9 @@ export class StorageService {
       key = this.buildKey(businessId, cleanFolder, filename);
     }
 
-    this.resolveSafeFilePath(businessId, key);
+    const canonicalKey = this.resolveCanonicalKey(businessId, key);
     if (this.objectStorage) {
-      await this.uploadObject(key, buffer, mimeType);
+      await this.uploadObject(canonicalKey, buffer, mimeType);
       const fileUrl = this.buildFileUrl(key);
       return {
         key,
@@ -552,8 +557,8 @@ export class StorageService {
   }
 
   async getPresignedDownloadUrl(businessId: string, key: string): Promise<string> {
-    this.resolveSafeFilePath(businessId, key);
-    return this.buildFileUrl(key);
+    const canonicalKey = this.resolveCanonicalKey(businessId, key);
+    return this.buildFileUrl(canonicalKey);
   }
 
   async getFile(
@@ -561,8 +566,9 @@ export class StorageService {
     key: string,
   ): Promise<{ absolutePath?: string; buffer?: Buffer; mimeType: string; filename: string }> {
     const filePath = this.resolveSafeFilePath(businessId, key);
+    const canonicalKey = path.relative(this.baseDir, filePath).split(path.sep).join('/');
     if (this.objectStorage) {
-      const buffer = await this.readObject(key);
+      const buffer = await this.readObject(canonicalKey);
       const ext = this.getExtension(key);
       return {
         buffer,
@@ -601,8 +607,9 @@ export class StorageService {
 
   async deleteFile(businessId: string, key: string): Promise<{ success: boolean }> {
     const filePath = this.resolveSafeFilePath(businessId, key);
+    const canonicalKey = path.relative(this.baseDir, filePath).split(path.sep).join('/');
     if (this.objectStorage) {
-      await this.removeObject(key);
+      await this.removeObject(canonicalKey);
       return { success: true };
     }
 
