@@ -97,7 +97,11 @@ describe('Novu Integration & Outbox Worker Engine (Part 5)', () => {
       mockDb.db.select.mockReturnValueOnce({
         from: () => ({
           where: () => ({
-            limit: () => Promise.resolve([pendingRecord]),
+            orderBy: () => ({
+              limit: () => ({
+                for: () => Promise.resolve([pendingRecord]),
+              }),
+            }),
           }),
         }),
       });
@@ -138,7 +142,11 @@ describe('Novu Integration & Outbox Worker Engine (Part 5)', () => {
       mockDb.db.select.mockReturnValueOnce({
         from: () => ({
           where: () => ({
-            limit: () => Promise.resolve([pendingRecord]),
+            orderBy: () => ({
+              limit: () => ({
+                for: () => Promise.resolve([pendingRecord]),
+              }),
+            }),
           }),
         }),
       });
@@ -185,7 +193,11 @@ describe('Novu Integration & Outbox Worker Engine (Part 5)', () => {
       mockDb.db.select.mockReturnValueOnce({
         from: () => ({
           where: () => ({
-            limit: () => Promise.resolve([pendingRecord]),
+            orderBy: () => ({
+              limit: () => ({
+                for: () => Promise.resolve([pendingRecord]),
+              }),
+            }),
           }),
         }),
       });
