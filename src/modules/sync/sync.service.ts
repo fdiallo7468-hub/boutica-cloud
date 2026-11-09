@@ -252,6 +252,10 @@ export class SyncService {
     await this.db.db.transaction(async (tx) => {
       for (const op of sortedOps) {
         try {
+          // Serialize retries of the same tenant-scoped operation across concurrent
+          // requests/processes. The unique index remains the final integrity guard.
+          await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`${tenant.businessId}:${op.clientOperationId}`}, 0))`);
+
           // 1. Vérification d'idempotence stricte
           const [existingOp] = await tx
             .select()
