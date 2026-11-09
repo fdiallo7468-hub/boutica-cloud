@@ -166,9 +166,13 @@ export class SyncService {
           sinceDate
             ? and(
                 eq(variants.businessId, tenant.businessId),
+                eq(products.businessId, tenant.businessId),
                 or(gt(variants.createdAt, sinceDate), gt(variants.updatedAt, sinceDate)),
               )
-            : eq(variants.businessId, tenant.businessId),
+            : and(
+                eq(variants.businessId, tenant.businessId),
+                eq(products.businessId, tenant.businessId),
+              ),
         ),
       this.db.db.select().from(sales).where(filterByDate(sales.createdAt)),
       this.db.db.select().from(receivables).where(filterByDate(receivables.createdAt, receivables.updatedAt)),
