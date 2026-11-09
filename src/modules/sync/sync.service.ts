@@ -246,7 +246,9 @@ export class SyncService {
     };
 
     const sortedOps = [...dto.operations].sort(
-      (a, b) => getPriority(a.operationType) - getPriority(b.operationType),
+      (a, b) =>
+        getPriority(a.operationType) - getPriority(b.operationType) ||
+        a.clientOperationId.localeCompare(b.clientOperationId),
     );
 
     await this.db.db.transaction(async (tx) => {
