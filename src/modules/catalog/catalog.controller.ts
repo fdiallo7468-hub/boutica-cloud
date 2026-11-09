@@ -198,12 +198,26 @@ export class CatalogController {
     if (body.purchasePrice !== undefined) updates.purchasePrice = Money.fromDecimal(body.purchasePrice, currency).toDecimalString();
     if (body.sellingPrice !== undefined) updates.sellingPrice = Money.fromDecimal(body.sellingPrice, currency).toDecimalString();
 
-    const [variant] = await this.db.db
-      .update(variants)
-      .set(updates)
-      .where(and(eq(variants.id, variantId), eq(variants.businessId, tenant.businessId)))
-      .returning();
-    return variant;
+    try {
+      const [variant] = await this.db.db
+        .update(variants)
+        .set(updates)
+        .where(and(eq(variants.id, variantId), eq(variants.businessId, tenant.businessId)))
+        .returning();
+      return variant;
+    } catch (error) {
+      // PostgreSQL's unique index is the concurrency-safe authority for SKU
+      // uniqueness. Translate its violation into the documented HTTP 409.
+      let current: unknown = error;
+      for (let depth = 0; depth < 4 && current && typeof current === 'object'; depth += 1) {
+        const candidate = current as { code?: string; constraint?: string; cause?: unknown };
+        if (candidate.code === '23505' && candidate.constraint === 'variants_business_sku_unique') {
+          throw new ConflictException('A variant with this SKU already exists in this business');
+        }
+        current = candidate.cause;
+      }
+      throw error;
+    }
   }
 }
 
