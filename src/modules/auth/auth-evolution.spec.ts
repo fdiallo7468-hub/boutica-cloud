@@ -186,6 +186,13 @@ describe("Auth Evolution & Data Model Specification", () => {
       // Mock transaction
       mockDb.db.transaction.mockImplementation(async (cb: any) => {
         const tx = {
+          select: jest.fn().mockReturnValue({
+            from: jest.fn().mockReturnValue({
+              where: jest.fn().mockReturnValue({
+                for: jest.fn().mockResolvedValue([{ id: "user-456", businessId: null }]),
+              }),
+            }),
+          }),
           insert: jest.fn().mockReturnValue({
             values: jest.fn().mockReturnValue({
               returning: jest.fn().mockResolvedValue([
@@ -202,7 +209,9 @@ describe("Auth Evolution & Data Model Specification", () => {
           }),
           update: jest.fn().mockReturnValue({
             set: jest.fn().mockReturnValue({
-              where: jest.fn().mockResolvedValue({}),
+              where: jest.fn().mockReturnValue({
+                returning: jest.fn().mockResolvedValue([{ id: "user-456" }]),
+              }),
             }),
           }),
         };
