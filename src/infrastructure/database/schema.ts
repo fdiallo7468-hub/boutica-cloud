@@ -320,7 +320,9 @@ export const suppliers = pgTable('suppliers', {
   businessId: uuid('business_id').notNull().references(() => businesses.id),
   name: text('name').notNull(),
   phone: text('phone'),
+  isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const purchases = pgTable('purchases', {
@@ -347,7 +349,9 @@ export const customers = pgTable('customers', {
   businessId: uuid('business_id').notNull().references(() => businesses.id),
   name: text('name').notNull(),
   phone: text('phone'),
+  isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const sales = pgTable(
