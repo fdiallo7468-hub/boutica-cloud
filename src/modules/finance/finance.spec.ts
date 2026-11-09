@@ -303,7 +303,7 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
     it('rejects cancelling an already cancelled payment', async () => {
       mockDb.db.select.mockReturnValueOnce({
         from: () => ({
-          where: () => Promise.resolve([{ id: 'pay-already-cancelled', status: 'CANCELLED' }]),
+          where: () => ({ for: () => Promise.resolve([{ id: 'pay-already-cancelled', status: 'CANCELLED' }]) }),
         }),
       });
 
