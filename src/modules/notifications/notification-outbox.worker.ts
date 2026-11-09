@@ -1,9 +1,12 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { and, eq, lte } from 'drizzle-orm';
+import { and, asc, eq, lte, or } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
 import { notificationOutbox } from '../../infrastructure/database/schema';
 import { NovuClientService } from './novu-client.service';
 import { NovuEventType } from './novu.types';
+
+const POLL_INTERVAL_MS = 15_000;
+const LOCK_TIMEOUT_MS = 5 * 60 * 1_000;
 
 @Injectable()
 export class NotificationOutboxWorker implements OnModuleInit, OnModuleDestroy {
@@ -17,16 +20,19 @@ export class NotificationOutboxWorker implements OnModuleInit, OnModuleDestroy {
     private readonly novuClient: NovuClientService,
   ) {}
 
-  onModuleInit() {
-    // Polling régulier de l'outbox toutes les 15 secondes
+  onModuleInit(): void {
+    // Run once at startup, then continue polling at a fixed interval.
+    void this.processPendingEvents().catch((error: unknown) => {
+      this.logger.error('Initial notification outbox processing failed.', error);
+    });
     this.intervalRef = setInterval(() => {
-      this.processPendingEvents().catch((err) => {
-        this.logger.error(`Erreur inattendue du worker Outbox : ${err.message}`);
+      void this.processPendingEvents().catch((error: unknown) => {
+        this.logger.error('Notification outbox polling failed.', error);
       });
-    }, 15000);
+    }, POLL_INTERVAL_MS);
   }
 
-  onModuleDestroy() {
+  onModuleDestroy(): void {
     if (this.intervalRef) {
       clearInterval(this.intervalRef);
       this.intervalRef = null;
@@ -34,9 +40,13 @@ export class NotificationOutboxWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Traite un lot d'événements en attente avec verrouillage logique et backoff exponentiel.
+   * Claims records atomically with FOR UPDATE SKIP LOCKED. This is safe across
+   * multiple application instances; the in-memory flag only avoids overlapping
+   * batches inside this process and is not treated as a distributed lock.
    */
-  async processPendingEvents(batchSize: number = 20): Promise<{ processed: number; succeeded: number; failed: number }> {
+  async processPendingEvents(
+    batchSize = 20,
+  ): Promise<{ processed: number; succeeded: number; failed: number }> {
     if (this.isProcessing) {
       return { processed: 0, succeeded: 0, failed: 0 };
     }
@@ -46,88 +56,102 @@ export class NotificationOutboxWorker implements OnModuleInit, OnModuleDestroy {
     let failed = 0;
 
     try {
-      const now = new Date();
+      const claimedEvents = await this.db.db.transaction(async (tx) => {
+        const now = new Date();
+        const staleLockTime = new Date(now.getTime() - LOCK_TIMEOUT_MS);
+        const events = await tx
+          .select()
+          .from(notificationOutbox)
+          .where(or(
+            and(
+              eq(notificationOutbox.status, 'PENDING'),
+              lte(notificationOutbox.availableAt, now),
+            ),
+            and(
+              eq(notificationOutbox.status, 'PROCESSING'),
+              lte(notificationOutbox.lockedAt, staleLockTime),
+            ),
+          ))
+          .orderBy(asc(notificationOutbox.createdAt))
+          .limit(Math.max(1, Math.min(batchSize, 100)))
+          .for('update', { skipLocked: true });
 
-      // Récupération des événements PENDING dont le délai d'éligibilité (availableAt) est échu
-      const pendingEvents = await this.db.db
-        .select()
-        .from(notificationOutbox)
-        .where(
-          and(
-            eq(notificationOutbox.status, 'PENDING'),
-            lte(notificationOutbox.availableAt, now),
-          ),
-        )
-        .limit(batchSize);
+        const claimed: Array<typeof events[number] & { attempts: number }> = [];
+        for (const event of events) {
+          const attempts = event.attempts + 1;
+          await tx
+            .update(notificationOutbox)
+            .set({
+              status: 'PROCESSING',
+              attempts,
+              lockedAt: now,
+            })
+            .where(and(
+              eq(notificationOutbox.id, event.id),
+              or(
+                eq(notificationOutbox.status, 'PENDING'),
+                eq(notificationOutbox.status, 'PROCESSING'),
+              ),
+            ));
+          claimed.push({ ...event, attempts });
+        }
+        return claimed;
+      });
 
-      if (pendingEvents.length === 0) {
-        return { processed: 0, succeeded: 0, failed: 0 };
-      }
+      for (const event of claimedEvents) {
+        try {
+          const recipientId = (event.payload as Record<string, unknown>)?.recipientId;
+          const result = await this.novuClient.triggerWorkflow(
+            event.eventType as NovuEventType,
+            typeof recipientId === 'string' ? recipientId : event.businessId,
+            (event.payload as Record<string, unknown>) || {},
+            event.deduplicationKey,
+          );
 
-      this.logger.debug(`[Outbox Worker] Traitement de ${pendingEvents.length} événements en attente...`);
+          if (!result.success) {
+            throw new Error(result.error || 'Échec de livraison Novu');
+          }
 
-      for (const event of pendingEvents) {
-        // Verrouillage logique de l'événement
-        await this.db.db
-          .update(notificationOutbox)
-          .set({
-            status: 'PROCESSING',
-            lockedAt: new Date(),
-          })
-          .where(eq(notificationOutbox.id, event.id));
-
-        const recipientId = (event.payload as any)?.recipientId || event.businessId;
-
-        // Transmission à Novu avec déduplication
-        const result = await this.novuClient.triggerWorkflow(
-          event.eventType as NovuEventType,
-          recipientId,
-          (event.payload as Record<string, unknown>) || {},
-          event.deduplicationKey,
-        );
-
-        if (result.success) {
-          // Succès définitif
           await this.db.db
             .update(notificationOutbox)
             .set({
               status: 'DELIVERED',
+              lockedAt: null,
               deliveredAt: new Date(),
               lastError: null,
             })
-            .where(eq(notificationOutbox.id, event.id));
+            .where(and(
+              eq(notificationOutbox.id, event.id),
+              eq(notificationOutbox.status, 'PROCESSING'),
+            ));
           succeeded++;
-        } else {
-          // Échec : calcul du backoff exponentiel et gestion des retries
-          const newAttempts = event.attempts + 1;
-          const isFinalFailure = newAttempts >= this.maxAttempts;
-
-          // Backoff : 5s, 10s, 20s, 40s, 80s (max 300s)
-          const delaySeconds = Math.min(300, Math.pow(2, newAttempts) * 5);
-          const nextAttemptAt = new Date(Date.now() + delaySeconds * 1000);
+        } catch (error: unknown) {
+          const isFinalFailure = event.attempts >= this.maxAttempts;
+          const delaySeconds = Math.min(300, 5 * (2 ** Math.max(0, event.attempts - 1)));
+          const nextAttemptAt = new Date(Date.now() + delaySeconds * 1_000);
+          const errorMessage = error instanceof Error ? error.message : 'Unknown notification delivery error';
 
           await this.db.db
             .update(notificationOutbox)
             .set({
               status: isFinalFailure ? 'FAILED' : 'PENDING',
-              attempts: newAttempts,
               availableAt: nextAttemptAt,
-              lastError: result.error || 'Échec de livraison Novu',
+              lockedAt: null,
+              lastError: errorMessage.slice(0, 1_000),
             })
-            .where(eq(notificationOutbox.id, event.id));
+            .where(and(
+              eq(notificationOutbox.id, event.id),
+              eq(notificationOutbox.status, 'PROCESSING'),
+            ));
           failed++;
 
           this.logger.warn(
-            `[Outbox Worker] Échec livraison événement ${event.id} (tentative ${newAttempts}/${this.maxAttempts}). Prochaine tentative à ${nextAttemptAt.toISOString()}`,
+            `Notification ${event.id} failed (attempt ${event.attempts}/${this.maxAttempts}); next attempt: ${nextAttemptAt.toISOString()}.`,
           );
         }
       }
 
-      return {
-        processed: pendingEvents.length,
-        succeeded,
-        failed,
-      };
+      return { processed: claimedEvents.length, succeeded, failed };
     } finally {
       this.isProcessing = false;
     }
