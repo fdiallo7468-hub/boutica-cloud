@@ -28,6 +28,7 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
         select: jest.fn(),
         insert: jest.fn(),
         update: jest.fn(),
+        execute: jest.fn().mockResolvedValue([]),
         transaction: jest.fn(async (cb) => cb(mockDb.db)),
       },
     };
