@@ -256,7 +256,7 @@ describe('StorageService (Stockage Local Multi-Tenant Durci)', () => {
       for (const res of results) {
         const fileInfo = await storageService.getFile(tenantId, res.key);
         expect(fileInfo.mimeType).toBe('image/png');
-        expect(fs.existsSync(fileInfo.absolutePath)).toBe(true);
+        expect(Boolean(fileInfo.absolutePath && fs.existsSync(fileInfo.absolutePath))).toBe(true);
       }
     });
 
