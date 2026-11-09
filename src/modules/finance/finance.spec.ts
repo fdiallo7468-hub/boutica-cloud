@@ -19,6 +19,7 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
     businessId: 'biz-test-1',
     name: 'Entreprise Diallo BTP',
     phone: '+221770000000',
+    isActive: true,
   };
 
   beforeEach(() => {
