@@ -81,9 +81,25 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
     it('ingests offline operations in strict dependency order (Customer -> Sale -> Payment)', async () => {
       // Mock idempotency checks (none existing)
       mockDb.db.select
-        .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([]) }) }) // op 1 check
-        .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([]) }) }) // op 2 check
-        .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([]) }) }); // op 3 check
+        .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([]) }) }) // customer idempotency check
+        .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([]) }) }) // sale idempotency check
+        .mockReturnValueOnce({
+          from: () => ({
+            where: () => ({
+              limit: () => Promise.resolve([{ id: 'cust-offline-1' }]),
+            }),
+          }),
+        }) // sale customer tenant validation
+        .mockReturnValueOnce({
+          from: () => ({
+            innerJoin: () => ({
+              where: () => ({
+                limit: () => Promise.resolve([{ id: 'var-1' }]),
+              }),
+            }),
+          }),
+        }) // sale variant tenant validation
+        .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([]) }) }); // payment idempotency check
 
       // Mock inserts
       mockDb.db.insert
