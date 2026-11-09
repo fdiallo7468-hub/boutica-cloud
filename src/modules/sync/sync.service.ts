@@ -18,6 +18,7 @@ import {
 } from '../../infrastructure/database/schema';
 import { Tenant } from '../auth/tenant.type';
 import { FinanceService } from '../finance/finance.service';
+import { PaymentMethodEnum } from '../finance/dto/finance.dto';
 import { NotificationOutboxService } from '../notifications/notification-outbox.service';
 import { NOVU_EVENT_TYPES } from '../notifications/novu.types';
 import { OfflineOperationItemDto, RegisterDeviceDto, SyncPushDto } from './dto/sync.dto';
@@ -232,13 +233,10 @@ export class SyncService {
     const getPriority = (type: string): number => {
       switch (type) {
         case 'CREATE_CUSTOMER':
-        case 'CREATE_SUPPLIER':
           return 1;
         case 'CREATE_SALE':
-        case 'CREATE_PURCHASE':
           return 2;
         case 'RECORD_PAYMENT':
-        case 'CREATE_RECEIVABLE':
           return 3;
         case 'RECORD_EXPENSE':
           return 4;
@@ -449,11 +447,20 @@ export class SyncService {
 
             case 'RECORD_PAYMENT': {
               const p = op.payload as any;
+              const paymentAmount = Number(p.amount);
+              if (
+                typeof p.customerId !== 'string' ||
+                !Number.isFinite(paymentAmount) ||
+                paymentAmount <= 0 ||
+                !Object.values(PaymentMethodEnum).includes(p.paymentMethod)
+              ) {
+                throw new BadRequestException('Offline payment payload is invalid');
+              }
               const payment = await this.financeService.recordPayment(tenant, {
                 customerId: p.customerId,
                 receivableId: p.receivableId,
                 saleId: p.saleId,
-                amount: Number(p.amount),
+                amount: paymentAmount,
                 paymentMethod: p.paymentMethod,
                 transactionReference: p.transactionReference,
                 notes: p.notes,
@@ -464,6 +471,11 @@ export class SyncService {
 
             case 'RECORD_EXPENSE': {
               const p = op.payload as any;
+              const expenseAmount = Number(p.amount);
+              if (typeof p.category !== 'string' || !p.category.trim() ||
+                  !Number.isFinite(expenseAmount) || expenseAmount <= 0) {
+                throw new BadRequestException('Offline expense payload is invalid');
+              }
               const [exp] = await operationTx
                 .insert(expenses)
                 .values({
@@ -471,7 +483,7 @@ export class SyncService {
                   businessId: tenant.businessId,
                   category: p.category,
                   description: p.description || null,
-                  amount: p.amount.toString(),
+                  amount: expenseAmount.toString(),
                   createdAt: op.clientTimestamp ? new Date(op.clientTimestamp) : new Date(),
                 })
                 .returning();
