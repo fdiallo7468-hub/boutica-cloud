@@ -174,7 +174,7 @@ export class StorageService {
     return fetch(url, {
       method,
       headers: requestHeaders,
-      ...(body ? { body } : {}),
+      ...(body ? { body: body as unknown as BodyInit } : {}),
       signal: AbortSignal.timeout(20_000),
     });
   }
