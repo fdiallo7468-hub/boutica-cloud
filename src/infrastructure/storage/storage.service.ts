@@ -491,6 +491,7 @@ export class StorageService {
     }
 
     const canonicalKey = this.resolveCanonicalKey(businessId, key);
+    key = canonicalKey;
     if (this.objectStorage) {
       await this.uploadObject(canonicalKey, buffer, mimeType);
       const fileUrl = this.buildFileUrl(key);
