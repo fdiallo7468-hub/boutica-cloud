@@ -8,11 +8,12 @@
   "rootDir": "..",
   "testRegex": "test/e2e/.*\\.e2e-spec\\.ts$",
   "transform": {
-    "^.+\\.m?[tj]sx?$": [
+    "^.+\\.tsx?$": [
       "ts-jest",
       {
+        "useESM": true,
         "tsconfig": {
-          "allowJs": true
+          "module": "ESNext"
         }
       }
     ]
@@ -20,7 +21,10 @@
   "testEnvironment": "node",
   "maxWorkers": 1,
   "testTimeout": 30000,
-  "transformIgnorePatterns": [
-    "node_modules/(?!rou3/)"
-  ]
+  "extensionsToTreatAsEsm": [
+    ".ts"
+  ],
+  "moduleNameMapper": {
+    "^(\\.{1,2}/.*)\\.js$": "$1"
+  }
 }
