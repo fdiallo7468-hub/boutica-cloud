@@ -56,6 +56,25 @@ export class FinanceService {
     return this.db.db.transaction(async (tx) => {
       let targetReceivable: typeof receivables.$inferSelect | null = null;
 
+      // A supplied saleId must belong to this tenant and to the same customer.
+      if (dto.saleId) {
+        const [sale] = await tx
+          .select()
+          .from(sales)
+          .where(and(
+            eq(sales.id, dto.saleId),
+            eq(sales.businessId, tenant.businessId),
+          ))
+          .for('update');
+
+        if (!sale) {
+          throw new NotFoundException('Vente introuvable pour cette entreprise');
+        }
+        if (sale.status !== 'COMPLETED' || sale.customerId !== dto.customerId) {
+          throw new BadRequestException('Le paiement doit correspondre au client d’une vente terminée');
+        }
+      }
+
       // 2. Si le paiement est associé à une créance, vérifier le solde
       if (dto.receivableId) {
         const [rec] = await tx
@@ -75,6 +94,12 @@ export class FinanceService {
           throw new NotFoundException('Créance introuvable');
         }
 
+        if (rec.customerId !== dto.customerId) {
+          throw new BadRequestException('Le client du paiement ne correspond pas au client de la créance');
+        }
+        if (dto.saleId && dto.saleId !== rec.saleId) {
+          throw new BadRequestException('La vente du paiement ne correspond pas à la vente de la créance');
+        }
         if (rec.status === 'PAID' || rec.status === 'CANCELLED') {
           throw new BadRequestException(`Cette créance est déjà clôturée (statut: ${rec.status})`);
         }
