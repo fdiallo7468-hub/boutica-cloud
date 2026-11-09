@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable } from '@nestjs/comm
 import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../../infrastructure/database/database';
-import { businesses, idempotencyKeys, saleItems, sales, stock, stockMovements, variants } from '../../../infrastructure/database/schema';
+import { businesses, customers, idempotencyKeys, saleItems, sales, stock, stockMovements, variants } from '../../../infrastructure/database/schema';
 import { Money, Quantity } from '../../../common/domain';
 import { hashRequestPayload } from '../../../common/idempotency/idempotency.util';
 import { Tenant } from '../../auth/tenant.type';
@@ -52,6 +52,19 @@ export class CreateSaleUseCase {
 
       const [business] = await tx.select().from(businesses).where(eq(businesses.id, tenant.businessId));
       const currency = business?.currency ?? 'XOF';
+
+      if (dto.customerId) {
+        const [customer] = await tx
+          .select({ id: customers.id, isActive: customers.isActive })
+          .from(customers)
+          .where(and(
+            eq(customers.id, dto.customerId),
+            eq(customers.businessId, tenant.businessId),
+          ));
+        if (!customer || !customer.isActive) {
+          throw new BadRequestException('Customer does not exist, is archived, or does not belong to this business');
+        }
+      }
 
       const variantIds = [...new Set(dto.items.map((i) => i.variantId))].sort();
 
