@@ -213,7 +213,7 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
           from: () => ({ where: () => Promise.resolve([mockCustomer]) }),
         })
         .mockReturnValueOnce({
-          from: () => ({ where: () => Promise.resolve([existingReceivable]) }),
+          from: () => ({ where: () => ({ for: () => Promise.resolve([existingReceivable]) }) }),
         });
 
       await expect(
