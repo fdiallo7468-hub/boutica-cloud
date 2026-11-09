@@ -160,7 +160,14 @@ const rawEnvSchema = z.object({
   ARCJET_KEY: z.string().optional(),
   ARCJET_ENV: z.enum(['development', 'production', 'test']).optional(),
 
-  // Stockage Médias local zéro-coût
+  // S3-compatible object storage (Cloudflare R2, AWS S3, Backblaze B2, MinIO).
+  OBJECT_STORAGE_ENDPOINT: z.string().url().optional(),
+  OBJECT_STORAGE_BUCKET: z.string().min(3).optional(),
+  OBJECT_STORAGE_REGION: z.string().min(1).optional(),
+  OBJECT_STORAGE_ACCESS_KEY_ID: z.string().min(1).optional(),
+  OBJECT_STORAGE_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+
+  // Local storage is development/test only; production requires durable object storage.
   UPLOADS_DIR: z.string().optional().default('./uploads'),
 
   // Phase 6: Novu Notification Engine
@@ -287,6 +294,46 @@ export const envSchema = rawEnvSchema.transform((raw, ctx) => {
   } else {
     if (!authUrl || authUrl.trim() === '') {
       authUrl = 'http://localhost:3000';
+    }
+  }
+
+  // Durable media storage is mandatory in production. Render's ephemeral
+  // filesystem must never be the only copy of customer documents or images.
+  const objectStorageFields = [
+    'OBJECT_STORAGE_ENDPOINT',
+    'OBJECT_STORAGE_BUCKET',
+    'OBJECT_STORAGE_REGION',
+    'OBJECT_STORAGE_ACCESS_KEY_ID',
+    'OBJECT_STORAGE_SECRET_ACCESS_KEY',
+  ] as const;
+  if (isProduction) {
+    for (const field of objectStorageFields) {
+      const value = raw[field];
+      if (typeof value !== 'string' || value.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [field],
+          message: `${field} is required in production; local ephemeral file storage is not supported`,
+        });
+      }
+    }
+    if (raw.OBJECT_STORAGE_ENDPOINT) {
+      try {
+        const endpoint = new URL(raw.OBJECT_STORAGE_ENDPOINT);
+        if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['OBJECT_STORAGE_ENDPOINT'],
+            message: 'OBJECT_STORAGE_ENDPOINT must be an HTTPS endpoint without credentials, query parameters or fragments',
+          });
+        }
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['OBJECT_STORAGE_ENDPOINT'],
+          message: 'OBJECT_STORAGE_ENDPOINT must be a valid URL',
+        });
+      }
     }
   }
 
