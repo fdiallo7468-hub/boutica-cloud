@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger } from '@nestjs/common';
 import { and, eq, gt, or, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
 import {
@@ -269,13 +269,59 @@ export class SyncService {
                 })
                 .onConflictDoNothing()
                 .returning();
-              entityId = c?.id || p.id;
+              if (!c) {
+                throw new ConflictException('Customer identifier already exists or could not be created');
+              }
+              entityId = c.id;
               break;
             }
 
             case 'CREATE_SALE': {
               const p = op.payload as any;
               const saleId = p.id || undefined;
+
+              if (!Array.isArray(p.items) || p.items.length === 0) {
+                throw new BadRequestException('A synchronized sale must contain at least one item');
+              }
+              for (const amount of [p.subtotal, p.discount ?? 0, p.total]) {
+                if (!Number.isFinite(Number(amount)) || Number(amount) < 0) {
+                  throw new BadRequestException('Sale amounts must be finite non-negative numbers');
+                }
+              }
+              if (p.customerId) {
+                const [customer] = await tx
+                  .select({ id: customers.id })
+                  .from(customers)
+                  .where(and(
+                    eq(customers.id, p.customerId),
+                    eq(customers.businessId, tenant.businessId),
+                    eq(customers.isActive, true),
+                  ))
+                  .limit(1);
+                if (!customer) {
+                  throw new BadRequestException('Customer does not belong to this business or is inactive');
+                }
+              }
+              for (const item of p.items) {
+                if (!item || typeof item.variantId !== 'string' || !Number.isSafeInteger(item.quantity) || item.quantity <= 0) {
+                  throw new BadRequestException('Each sale item requires a valid variant and a positive integer quantity');
+                }
+                if (!Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice) < 0) {
+                  throw new BadRequestException('Sale item unit prices must be finite non-negative numbers');
+                }
+                const [ownedVariant] = await tx
+                  .select({ id: variants.id })
+                  .from(variants)
+                  .innerJoin(products, eq(variants.productId, products.id))
+                  .where(and(
+                    eq(variants.id, item.variantId),
+                    eq(products.businessId, tenant.businessId),
+                  ))
+                  .limit(1);
+                if (!ownedVariant) {
+                  throw new BadRequestException('A sale item references a variant outside this business');
+                }
+              }
 
               const [sale] = await tx
                 .insert(sales)
@@ -292,7 +338,10 @@ export class SyncService {
                 .onConflictDoNothing()
                 .returning();
 
-              entityId = sale?.id || saleId;
+              if (!sale) {
+                throw new ConflictException('Sale identifier already exists or could not be created');
+              }
+              entityId = sale.id;
 
               // Insertion des lignes de vente et décrémentation atomique de stock
               if (p.items && Array.isArray(p.items)) {
@@ -314,7 +363,8 @@ export class SyncService {
                       quantity: -item.quantity,
                     })
                     .onConflictDoUpdate({
-                      target: [stock.businessId, stock.variantId],
+                      // variantId is the primary key of the stock table.
+                      target: stock.variantId,
                       set: {
                         quantity: sql`${stock.quantity} - ${item.quantity}`,
                         updatedAt: new Date(),
@@ -380,8 +430,7 @@ export class SyncService {
             }
 
             default:
-              this.logger.warn(`Type d'opération hors ligne non pris en charge : ${op.operationType}`);
-              break;
+              throw new BadRequestException(`Unsupported offline operation type: ${op.operationType}`);
           }
 
           // 3. Journaliser le succès de l'opération
