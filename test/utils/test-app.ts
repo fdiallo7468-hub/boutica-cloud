@@ -1,10 +1,11 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import express from 'express';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { DatabaseService } from '../../src/infrastructure/database/database';
+import { users } from '../../src/infrastructure/database/schema';
 
 /**
  * Boots the real AppModule (real Postgres, real guards, real transactions)
@@ -70,10 +71,25 @@ export async function registerBusiness(app: INestApplication, name = 'Test Shop'
       password: 'a-very-long-password-123',
       businessName: `${name} ${counter}`,
     });
-  if (!res.body?.token || !res.body?.user?.businessId) {
-    throw new Error(`Sign-up did not return the expected shape: ${JSON.stringify(res.body)}`);
+  if (!res.body?.token || !res.body?.user?.id) {
+    throw new Error(`Sign-up did not return the expected authentication shape: ${JSON.stringify(res.body)}`);
   }
-  return { accessToken: res.body.token, businessId: res.body.user.businessId };
+
+  // PostgreSQL owns tenant provisioning. The Better Auth response schema may
+  // omit additional fields even though the AFTER hook reloads the persisted
+  // row, so read the authoritative business_id directly for integration setup.
+  const db = app.get(DatabaseService);
+  const [persistedUser] = await db.db
+    .select({ businessId: users.businessId })
+    .from(users)
+    .where(eq(users.id, res.body.user.id))
+    .limit(1);
+
+  if (!persistedUser?.businessId) {
+    throw new Error('Sign-up completed without a persisted business_id');
+  }
+
+  return { accessToken: res.body.token, businessId: persistedUser.businessId };
 }
 
 export async function createProductWithVariant(
