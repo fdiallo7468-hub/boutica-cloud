@@ -59,7 +59,7 @@ jobs:
         run: npm test -- --runInBand
 
       - name: PostgreSQL integration tests
-        run: npm run test:e2e -- --runInBand
+        run: NODE_OPTIONS=--experimental-vm-modules npm run test:e2e -- --runInBand
 
       - name: Production TypeScript build
         run: npx nest build
