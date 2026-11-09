@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, ConflictException, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { and, count, eq, getTableColumns, ilike, or, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
