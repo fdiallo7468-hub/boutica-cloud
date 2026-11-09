@@ -12,6 +12,15 @@ export class ArcjetService implements OnModuleInit {
 
   async onModuleInit() {
     const key = this.config.get('ARCJET_KEY', { infer: true });
+    const isProduction = this.config.get('NODE_ENV', { infer: true }) === 'production';
+    if (!key || !key.trim()) {
+      if (isProduction) {
+        throw new Error('ARCJET_KEY is required in production; Arcjet protection cannot be disabled.');
+      }
+      this.logger.warn('ARCJET_KEY is not configured; Arcjet is disabled in this non-production environment.');
+      return;
+    }
+
     if (key && key.trim()) {
       try {
         const { default: arcjet, shield, detectBot, slidingWindow } = await (eval('import("@arcjet/node")') as Promise<any>);
@@ -34,10 +43,11 @@ export class ArcjetService implements OnModuleInit {
         this.isEnabled = true;
         this.logger.log('Arcjet Security activé avec succès en mode LIVE');
       } catch (err: any) {
-        this.logger.warn(`Impossible d'initialiser Arcjet : ${err.message}. Mode simulation actif.`);
+        this.logger.error(`Arcjet initialization failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+        if (isProduction) {
+          throw new Error('Arcjet initialization failed in production; refusing to start without protection.');
+        }
       }
-    } else {
-      this.logger.log('ARCJET_KEY non configurée — Arcjet fonctionne en mode pass-through');
     }
   }
 
@@ -45,10 +55,18 @@ export class ArcjetService implements OnModuleInit {
     return this.isEnabled;
   }
 
+  get production(): boolean {
+    return this.config.get('NODE_ENV', { infer: true }) === 'production';
+  }
+
   async protect(req: any) {
     if (!this.isEnabled || !this.aj) {
+      if (this.production) {
+        throw new Error('Arcjet protection is unavailable in production');
+      }
       return {
         isDenied: () => false,
+        isErrored: () => false,
         reason: null,
       };
     }
