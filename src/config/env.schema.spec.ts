@@ -152,7 +152,7 @@ describe('envSchema Validation & Security', () => {
       expect(parsed.BETTER_AUTH_SECRET.length).toBeGreaterThanOrEqual(32);
       expect(parsed.BETTER_AUTH_URL).toBe('http://localhost:3000');
       expect(parsed.CORS_ORIGIN).toBe('http://localhost:3000,http://localhost:5173');
-      expect(parsed.UPLOADS_DIR).toBe('./uploads');
+      expect(parsed.CLOUDINARY_CLOUD_NAME).toBeUndefined();
     });
 
     it('devrait accepter des valeurs personnalisées en développement', () => {
