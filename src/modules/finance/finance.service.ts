@@ -37,7 +37,7 @@ export class FinanceService {
    * et émission d'un événement Outbox.
    */
   async recordPayment(tenant: Tenant, dto: CreatePaymentDto, transaction?: any) {
-    if (dto.amount <= 0) {
+    if (!Number.isFinite(dto.amount) || dto.amount <= 0) {
       throw new BadRequestException('Le montant du paiement doit être strictement positif');
     }
 
