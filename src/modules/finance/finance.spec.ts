@@ -140,7 +140,7 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
         // 2. Receivable check in tx
         .mockReturnValueOnce({
           from: () => ({
-            where: () => Promise.resolve([existingReceivable]),
+            where: () => ({ for: () => Promise.resolve([existingReceivable]) }),
           }),
         });
 
@@ -259,11 +259,11 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
       // 1. Payment lookup
       mockDb.db.select
         .mockReturnValueOnce({
-          from: () => ({ where: () => Promise.resolve([confirmedPayment]) }),
+          from: () => ({ where: () => ({ for: () => Promise.resolve([confirmedPayment]) }) }),
         })
         // 2. Linked receivable lookup
         .mockReturnValueOnce({
-          from: () => ({ where: () => Promise.resolve([linkedReceivable]) }),
+          from: () => ({ where: () => ({ for: () => Promise.resolve([linkedReceivable]) }) }),
         });
 
       // Update payment to CANCELLED
