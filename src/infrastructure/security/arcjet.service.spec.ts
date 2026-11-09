@@ -1,7 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { ArcjetService } from './arcjet.service';
 import { ArcjetGuard } from './arcjet.guard';
-import { ExecutionContext } from '@nestjs/common';
+import { ExecutionContext, ServiceUnavailableException } from '@nestjs/common';
 
 describe('Arcjet Security', () => {
   let configService: ConfigService;
@@ -21,6 +21,33 @@ describe('Arcjet Security', () => {
     expect(arcjetService.enabled).toBe(false);
     const decision = await arcjetService.protect({} as any);
     expect(decision.isDenied()).toBe(false);
+  });
+
+  it('refuses to start in production when ARCJET_KEY is missing', async () => {
+    const productionConfig = {
+      get: jest.fn((key: string) => key === 'NODE_ENV' ? 'production' : ''),
+    };
+    const productionService = new ArcjetService(productionConfig as any);
+    await expect(productionService.onModuleInit()).rejects.toThrow('ARCJET_KEY is required in production');
+  });
+
+  it('fails closed in production when Arcjet returns an error decision', async () => {
+    const protectedService = {
+      enabled: true,
+      production: true,
+      protect: jest.fn().mockResolvedValue({
+        isErrored: () => true,
+        isDenied: () => false,
+      }),
+    };
+    const protectedGuard = new ArcjetGuard(protectedService as any);
+    const mockContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({ url: '/api/v1/products' }),
+      }),
+    } as unknown as ExecutionContext;
+
+    await expect(protectedGuard.canActivate(mockContext)).rejects.toThrow(ServiceUnavailableException);
   });
 
   it('devrait autoriser les requêtes vers /health sans blocage', async () => {
