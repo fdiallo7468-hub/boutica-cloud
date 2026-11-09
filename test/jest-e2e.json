@@ -1,15 +1,26 @@
 {
   "moduleFileExtensions": [
     "js",
+    "mjs",
     "json",
     "ts"
   ],
   "rootDir": "..",
   "testRegex": "test/e2e/.*\\.e2e-spec\\.ts$",
   "transform": {
-    "^.+\\.(t|j)s$": "ts-jest"
+    "^.+\\.m?[tj]sx?$": [
+      "ts-jest",
+      {
+        "tsconfig": {
+          "allowJs": true
+        }
+      }
+    ]
   },
   "testEnvironment": "node",
   "maxWorkers": 1,
-  "testTimeout": 30000
+  "testTimeout": 30000,
+  "transformIgnorePatterns": [
+    "node_modules/(?!rou3/)"
+  ]
 }
