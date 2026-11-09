@@ -315,11 +315,9 @@ Store/Business — see AUDIT_REPORT.md section D for how each is modeled, and
    - `NODE_ENV=production`
    - `CORS_ORIGIN` : origines HTTPS autorisées du client
    - `ARCJET_KEY` : clé Arcjet active (obligatoire en production)
-   - `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_BUCKET`,
-     `OBJECT_STORAGE_REGION`, `OBJECT_STORAGE_ACCESS_KEY_ID`,
-     `OBJECT_STORAGE_SECRET_ACCESS_KEY` : accès à un stockage objet S3-compatible
-     (Cloudflare R2, AWS S3 ou équivalent). Le système de fichiers Render
-     éphémère n'est jamais utilisé comme stockage média de production.
+   - `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`,
+     `CLOUDINARY_API_SECRET` : stockage média durable via Cloudinary.
+     Le secret API reste exclusivement côté backend.
 
 5. Appliquer la migration `0010_atomic_user_business_provisioning` à la base
    Neon avant de déployer la version applicative qui s'appuie sur ses triggers.
