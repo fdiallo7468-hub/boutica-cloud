@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import type { Env } from './config/env.schema';
+import { ArcjetService } from './infrastructure/security/arcjet.service';
 
 async function bootstrap() {
   // v2.0: Nest's built-in body parser is disabled — Better Auth needs the
@@ -29,6 +30,46 @@ async function bootstrap() {
   expressApp.set('trust proxy', 1);
 
   // 2. Gestionnaire Better Auth natif direct : préserve l\x27intégralité du chemin et des paramètres de requête (query params)
+  // Better Auth is mounted directly in Express, outside Nest's router.
+  // Nest global guards (including ArcjetGuard) therefore do not run for
+  // these endpoints; enforce the same Arcjet policy before the auth handler.
+  const arcjet = app.get(ArcjetService);
+  expressApp.use('/api/auth', async (req: any, res: any, next: (err?: unknown) => void) => {
+    try {
+      const decision = await arcjet.protect(req);
+      if (decision?.isErrored?.()) {
+        if (arcjet.production) {
+          return res.status(503).json({ statusCode: 503, message: 'Application protection could not evaluate this request' });
+        }
+        return next();
+      }
+
+      if (decision?.isDenied?.()) {
+        const reason = decision.reason;
+        if (reason?.isRateLimit?.()) {
+          return res.status(429).json({
+            statusCode: 429,
+            error: 'Too Many Requests',
+            message: 'Taux de requêtes trop élevé. Veuillez réessayer dans quelques instants.',
+          });
+        }
+        return res.status(403).json({
+          statusCode: 403,
+          error: 'Forbidden',
+          message: 'Requête bloquée par la politique de sécurité applicative.',
+        });
+      }
+
+      return next();
+    } catch (error) {
+      logger.error('Arcjet failed to evaluate a Better Auth request', error instanceof Error ? error.stack : undefined);
+      if (arcjet.production) {
+        return res.status(503).json({ statusCode: 503, message: 'Application protection is temporarily unavailable' });
+      }
+      return next();
+    }
+  });
+
   expressApp.use('/api/auth', (req: any, res: any) => {
     return toNodeHandler(auth)(req, res);
   });
