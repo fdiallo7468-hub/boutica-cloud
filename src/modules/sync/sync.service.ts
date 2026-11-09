@@ -276,11 +276,15 @@ export class SyncService {
 
           let entityId: string | undefined;
 
+          // Isolate each operation with a PostgreSQL savepoint so one rejected item
+          // cannot poison the transaction for the rest of the batch.
+          await operationTx.transaction(async (operationTx) => {
+
           // 2. Exécution selon le type d'opération
           switch (op.operationType) {
             case 'CREATE_CUSTOMER': {
               const p = op.payload as any;
-              const [c] = await tx
+              const [c] = await operationTx
                 .insert(customers)
                 .values({
                   id: p.id || undefined,
@@ -331,7 +335,7 @@ export class SyncService {
                 throw new BadRequestException('Sale subtotal, discount and total do not match the submitted sale items');
               }
               if (p.customerId) {
-                const [customer] = await tx
+                const [customer] = await operationTx
                   .select({ id: customers.id })
                   .from(customers)
                   .where(and(
@@ -351,7 +355,7 @@ export class SyncService {
                 if (!Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice) < 0) {
                   throw new BadRequestException('Sale item unit prices must be finite non-negative numbers');
                 }
-                const [ownedVariant] = await tx
+                const [ownedVariant] = await operationTx
                   .select({ id: variants.id })
                   .from(variants)
                   .innerJoin(products, eq(variants.productId, products.id))
@@ -366,7 +370,7 @@ export class SyncService {
                 }
               }
 
-              const [sale] = await tx
+              const [sale] = await operationTx
                 .insert(sales)
                 .values({
                   id: saleId,
@@ -389,7 +393,7 @@ export class SyncService {
               // Insertion des lignes de vente et décrémentation atomique de stock
               if (p.items && Array.isArray(p.items)) {
                 for (const item of p.items) {
-                  await tx.insert(saleItems).values({
+                  await operationTx.insert(saleItems).values({
                     saleId: entityId!,
                     variantId: item.variantId,
                     quantity: item.quantity,
@@ -398,7 +402,7 @@ export class SyncService {
                   });
 
                   // Décrémentation de stock (delta)
-                  await tx
+                  await operationTx
                     .insert(stock)
                     .values({
                       businessId: tenant.businessId,
@@ -415,7 +419,7 @@ export class SyncService {
                     });
 
                   // Mouvement de stock d'audit
-                  await tx.insert(stockMovements).values({
+                  await operationTx.insert(stockMovements).values({
                     businessId: tenant.businessId,
                     variantId: item.variantId,
                     type: 'SALE',
@@ -426,7 +430,7 @@ export class SyncService {
               }
 
               // Émission d'événement outbox Novu
-              await this.outboxService.enqueue(tx, {
+              await this.outboxService.enqueue(operationTx, {
                 businessId: tenant.businessId,
                 eventType: NOVU_EVENT_TYPES.SALE_COMPLETED,
                 deduplicationKey: `sale-completed-${entityId}`,
@@ -450,14 +454,14 @@ export class SyncService {
                 paymentMethod: p.paymentMethod,
                 transactionReference: p.transactionReference,
                 notes: p.notes,
-              });
+              }, operationTx);
               entityId = payment.id;
               break;
             }
 
             case 'RECORD_EXPENSE': {
               const p = op.payload as any;
-              const [exp] = await tx
+              const [exp] = await operationTx
                 .insert(expenses)
                 .values({
                   id: p.id || undefined,
@@ -477,7 +481,7 @@ export class SyncService {
           }
 
           // 3. Journaliser le succès de l'opération
-          await tx.insert(offlineOperationsLog).values({
+          await operationTx.insert(offlineOperationsLog).values({
             businessId: tenant.businessId,
             deviceId: dto.deviceId,
             clientOperationId: op.clientOperationId,
@@ -486,6 +490,7 @@ export class SyncService {
             clientTimestamp: new Date(op.clientTimestamp),
             serverTimestamp,
             payload: { ...op.payload, entityId },
+          });
           });
 
           results.push({
