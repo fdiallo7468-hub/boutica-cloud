@@ -290,7 +290,17 @@ export const envSchema = rawEnvSchema.transform((raw, ctx) => {
     }
   }
 
-  // 4. Validation de CORS_ORIGIN
+  // 4. Arcjet is mandatory in production: a silently disabled security guard
+  // would otherwise make the global protection look active while passing traffic.
+  if (isProduction && (!raw.ARCJET_KEY || raw.ARCJET_KEY.trim().length === 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['ARCJET_KEY'],
+      message: 'ARCJET_KEY is required in production; refusing to start without application protection',
+    });
+  }
+
+  // 5. Validation de CORS_ORIGIN
   let corsOrigin = raw.CORS_ORIGIN;
   if (isProduction) {
     if (!corsOrigin || corsOrigin.trim() === '') {
