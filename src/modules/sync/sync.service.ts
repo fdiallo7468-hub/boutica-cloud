@@ -117,6 +117,9 @@ export class SyncService {
   async pullDeltas(tenant: Tenant, sinceIso?: string) {
     const serverTimestamp = new Date();
     const sinceDate = sinceIso ? new Date(sinceIso) : null;
+    if (sinceIso && (!sinceDate || Number.isNaN(sinceDate.getTime()))) {
+      throw new BadRequestException('The sync cursor must be a valid ISO date');
+    }
 
     const filterByDate = (colCreated: any, colUpdated?: any) => {
       const bizFilter = eq(colCreated.table.businessId, tenant.businessId);
@@ -138,8 +141,8 @@ export class SyncService {
       expensesList,
       stockList,
     ] = await Promise.all([
-      this.db.db.select().from(customers).where(filterByDate(customers.createdAt)),
-      this.db.db.select().from(suppliers).where(filterByDate(suppliers.createdAt)),
+      this.db.db.select().from(customers).where(filterByDate(customers.createdAt, customers.updatedAt)),
+      this.db.db.select().from(suppliers).where(filterByDate(suppliers.createdAt, suppliers.updatedAt)),
       this.db.db.select().from(products).where(filterByDate(products.createdAt, products.updatedAt)),
       this.db.db
         .select({
@@ -159,12 +162,26 @@ export class SyncService {
         })
         .from(variants)
         .innerJoin(products, eq(variants.productId, products.id))
-        .where(eq(products.businessId, tenant.businessId)),
+        .where(
+          sinceDate
+            ? and(
+                eq(variants.businessId, tenant.businessId),
+                or(gt(variants.createdAt, sinceDate), gt(variants.updatedAt, sinceDate)),
+              )
+            : eq(variants.businessId, tenant.businessId),
+        ),
       this.db.db.select().from(sales).where(filterByDate(sales.createdAt)),
       this.db.db.select().from(receivables).where(filterByDate(receivables.createdAt, receivables.updatedAt)),
       this.db.db.select().from(payments).where(filterByDate(payments.createdAt, payments.updatedAt)),
       this.db.db.select().from(expenses).where(filterByDate(expenses.createdAt)),
-      this.db.db.select().from(stock).where(eq(stock.businessId, tenant.businessId)),
+      this.db.db
+        .select()
+        .from(stock)
+        .where(
+          sinceDate
+            ? and(eq(stock.businessId, tenant.businessId), gt(stock.updatedAt, sinceDate))
+            : eq(stock.businessId, tenant.businessId),
+        ),
     ]);
 
     // Récupérer les sale_items associés aux ventes récupérées
