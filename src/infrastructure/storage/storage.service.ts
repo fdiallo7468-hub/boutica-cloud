@@ -90,11 +90,11 @@ export class StorageService {
     }
     if (storageValues.every((value) => typeof value === 'string' && value.trim())) {
       this.objectStorage = {
-        endpoint: new URL(endpoint),
-        bucket,
-        region,
-        accessKeyId,
-        secretAccessKey,
+        endpoint: new URL(endpoint!),
+        bucket: bucket!,
+        region: region!,
+        accessKeyId: accessKeyId!,
+        secretAccessKey: secretAccessKey!,
       };
       this.logger.log('S3-compatible durable object storage configured.');
     } else {
