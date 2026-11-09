@@ -1,7 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { bearer } from "better-auth/plugins";
-import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { envSchema } from "../config/env.schema";
@@ -176,97 +175,36 @@ export const auth = betterAuth({
       create: {
         before: async (user) => {
           const rawEmail = (user.email || "").trim().toLowerCase();
+          const businessName = (user as { businessName?: string }).businessName?.trim();
 
-          // 1. Pre-check email uniqueness to guarantee atomicity and avoid orphaned businesses
-          const existingUser = await db.query.users.findFirst({
-            where: eq(users.email, rawEmail),
-          });
-          if (existingUser) {
-            throw new Error("Un compte avec cette adresse e-mail existe déjà");
+          // The PostgreSQL BEFORE/AFTER INSERT triggers provision the business,
+          // defaults, membership and users.business_id in the same transaction
+          // as the Better Auth user row. Do not create related rows from hooks:
+          // Better Auth lifecycle hooks are not a transaction boundary.
+          if (!businessName || businessName.length < 2 || businessName.length > 120) {
+            throw new Error("Le nom de l'entreprise doit comporter entre 2 et 120 caractères");
           }
 
           const rawCurrency = (user as { businessCurrency?: string }).businessCurrency?.trim().toUpperCase();
           const currency = rawCurrency && /^[A-Z]{3}$/.test(rawCurrency) ? rawCurrency : "XOF";
-          const businessName = (user as { businessName?: string }).businessName?.trim();
-          const businessPhone = (user as { businessPhone?: string }).businessPhone?.trim() || null;
           const rawSector = (user as { businessSector?: string }).businessSector?.trim()?.toUpperCase();
-          const sector: BusinessSectorType = rawSector === "ELECTRONIQUE" ? "ELECTRONIQUE" : "QUINCAILLERIE";
-          const businessAddress = (user as { businessAddress?: string }).businessAddress?.trim() || null;
-          const personalPhone = (user as { personalPhone?: string }).personalPhone?.trim() || null;
-
-          // 2. Strict Boutica Auth Rule:
-          // Account creation MUST have a valid businessName (Email + Password signup form).
-          // Direct OAuth signup attempts are strictly blocked.
-          if (!businessName) {
-            throw new Error(
-              "L'inscription directe via un fournisseur tiers n'est pas autorisée. Veuillez créer votre compte Boutica avec un e-mail et mot de passe, puis lier vos fournisseurs dans les paramètres.",
-            );
-          }
-
-          if (businessName.length < 2 || businessName.length > 120) {
-            throw new Error("Le nom de l'entreprise doit comporter entre 2 et 120 caractères");
-          }
-
-          // 3. Atomically create business, default sector activities, and default modules
-          const [business] = await db
-            .insert(businesses)
-            .values({
-              name: businessName,
-              currency,
-              phone: businessPhone,
-              sector,
-              address: businessAddress,
-            })
-            .returning();
-
-          if (!business) {
-            throw new Error("Échec de la création de l'entreprise");
-          }
-
-          // Seed default activities for selected sector
-          const defaultActivities = SECTOR_ACTIVITIES[sector].map((act) => ({
-            businessId: business.id,
-            activity: act.code,
-            isActive: true,
-          }));
-          if (defaultActivities.length > 0) {
-            await db.insert(businessActivities).values(defaultActivities).onConflictDoNothing();
-          }
-
-          // Seed default module configurations for selected sector
-          const defaultModules = getDefaultModulesForSector(sector).map((modCode) => ({
-            businessId: business.id,
-            module: modCode,
-            isEnabled: true,
-            settings: {},
-          }));
-          if (defaultModules.length > 0) {
-            await db.insert(businessModuleConfigurations).values(defaultModules).onConflictDoNothing();
-          }
+          const sector = rawSector === BUSINESS_SECTORS.ELECTRONIQUE
+            ? BUSINESS_SECTORS.ELECTRONIQUE
+            : BUSINESS_SECTORS.QUINCAILLERIE;
 
           return {
             data: {
               ...user,
               email: rawEmail,
-              businessId: business.id,
-              personalPhone,
+              businessName,
+              businessCurrency: currency,
+              businessSector: sector,
+              businessPhone: (user as { businessPhone?: string }).businessPhone?.trim() || null,
+              businessAddress: (user as { businessAddress?: string }).businessAddress?.trim() || null,
+              personalPhone: (user as { personalPhone?: string }).personalPhone?.trim() || null,
               role: "OWNER",
             },
           };
-        },
-        after: async (user) => {
-          // Record business ownership in business_members table
-          const customUser = user as typeof user & { businessId?: string | null; role?: string };
-          if (customUser.businessId && customUser.id) {
-            await db
-              .insert(businessMembers)
-              .values({
-                businessId: customUser.businessId,
-                userId: customUser.id,
-                role: (customUser.role as "OWNER" | "STAFF") || "OWNER",
-              })
-              .onConflictDoNothing();
-          }
         },
       },
     },
