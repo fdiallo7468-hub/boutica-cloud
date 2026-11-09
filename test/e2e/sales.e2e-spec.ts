@@ -155,7 +155,12 @@ describe('Sales (e2e)', () => {
   });
 
   it('rejects an unauthenticated request', async () => {
-    await request(app.getHttpServer()).post('/api/v1/sales').send({ items: [] }).expect(401);
+    // Keep the payload valid so this test isolates authentication rather
+    // than the DTO's non-empty-items validation (which can also return 400).
+    await request(app.getHttpServer())
+      .post('/api/v1/sales')
+      .send({ items: [{ variantId: '00000000-0000-0000-0000-000000000000', quantity: 1 }] })
+      .expect(401);
   });
 
   it('rejects a sale with two line items for the same variant (round-2 regression test)', async () => {
