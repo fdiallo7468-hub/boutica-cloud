@@ -66,7 +66,10 @@ export class FinanceService {
               eq(receivables.id, dto.receivableId),
               eq(receivables.businessId, tenant.businessId),
             ),
-          );
+          )
+          // Serialize payments against the same receivable. The balance check
+          // must observe the latest committed balance, not a stale snapshot.
+          .for('update');
 
         if (!rec) {
           throw new NotFoundException('Créance introuvable');
@@ -177,14 +180,17 @@ export class FinanceService {
             eq(payments.id, paymentId),
             eq(payments.businessId, tenant.businessId),
           ),
-        );
+        )
+        // Prevent two concurrent cancellation requests from restoring the
+        // same receivable balance twice.
+        .for('update');
 
       if (!payment) {
         throw new NotFoundException('Paiement introuvable');
       }
 
-      if (payment.status === 'CANCELLED') {
-        throw new ConflictException('Ce paiement est déjà annulé');
+      if (payment.status !== 'CONFIRMED') {
+        throw new ConflictException('Seul un paiement confirmé peut être annulé');
       }
 
       // 1. Marquer le paiement comme annulé
@@ -194,15 +200,27 @@ export class FinanceService {
           status: 'CANCELLED',
           updatedAt: new Date(),
         })
-        .where(eq(payments.id, paymentId))
+        .where(and(
+          eq(payments.id, paymentId),
+          eq(payments.businessId, tenant.businessId),
+          eq(payments.status, 'CONFIRMED'),
+        ))
         .returning();
+
+      if (!updatedPayment) {
+        throw new ConflictException('Le paiement a déjà été modifié par une autre opération');
+      }
 
       // 2. Restaurer la créance si le paiement y était rattaché
       if (payment.receivableId) {
         const [rec] = await tx
           .select()
           .from(receivables)
-          .where(eq(receivables.id, payment.receivableId));
+          .where(and(
+            eq(receivables.id, payment.receivableId),
+            eq(receivables.businessId, tenant.businessId),
+          ))
+          .for('update');
 
         if (rec) {
           const restoredPaid = Math.max(0, Number(rec.paidAmount) - Number(payment.amount));
@@ -220,7 +238,10 @@ export class FinanceService {
               status: newStatus,
               updatedAt: new Date(),
             })
-            .where(eq(receivables.id, rec.id));
+            .where(and(
+              eq(receivables.id, rec.id),
+              eq(receivables.businessId, tenant.businessId),
+            ));
         }
       }
 
