@@ -80,16 +80,20 @@ Edit `.env`:
 3. **`BETTER_AUTH_URL`** — the URL you'll actually hit this API at (e.g.
    `http://localhost:3000` for local dev).
 
-Then:
+Then apply the versioned migrations and start the API:
 
 ```bash
-npm run db:push     # pushes src/infrastructure/database/schema.ts to Neon directly
+npm run db:migrate
 npm run start:dev
 ```
 
-(`db:generate` + `db:migrate` also work against Neon exactly like any other
-Postgres — see "Scripts" below — `db:push` is just the fastest path for
-first getting a schema onto a fresh Neon branch.)
+Use `db:migrate` for a fresh database and for every environment that must
+receive database triggers or other SQL objects not represented in the Drizzle
+table schema. In particular, migration `0010_atomic_user_business_provisioning`
+installs PostgreSQL triggers that provision a new business, its default
+activities/modules, the OWNER membership, and `users.business_id` in the same
+transaction as the user-row insert. Do not replace this migration with
+`db:push`.
 
 The API is served unprefixed with an explicit version in each controller
 path, e.g. `http://localhost:3000/api/v1/products`. Swagger docs are at
@@ -113,10 +117,14 @@ curl http://localhost:3000/api/v1/products \
 ```
 
 Signing up creates a business AND its OWNER user in one call — `businessName`
-(and an optional `businessCurrency`, a 3-letter ISO 4217 code, defaulting to
-`XOF`) are Boutica-specific fields layered onto Better Auth's normal
-email/password sign-up. `POST /api/auth/sign-in/email` with `{email,
-password}` logs an existing user back in the same way.
+(and optional `businessCurrency`, `businessPhone`, `businessSector`,
+`businessAddress`, and `personalPhone`) are Boutica-specific fields layered
+onto Better Auth's normal email/password sign-up. PostgreSQL triggers provision
+the business, sector defaults, membership, and active `business_id` as part of
+the user-row transaction. If any of those writes fails, PostgreSQL rolls back
+the user row and the related business records together. `POST
+/api/auth/sign-in/email` with `{email, password}` logs an existing user back
+in the same way.
 
 **Password reset:** the mobile app calls `POST /api/auth/request-password-reset`
 with the account email and the hosted reset-page URL. Better Auth emails a
@@ -238,49 +246,37 @@ actually harmful, not applied uniformly everywhere by default.
 ## Running the tests
 
 ```bash
-npm test           # unit tests — pure domain logic, no DB needed
+npm test           # unit tests — no database required
 npm run test:cov   # unit tests with coverage
+npm run lint       # ESLint
 ```
 
-Integration tests exercise the real HTTP layer against a real Postgres
-database (auth, transactions, row locking, tenant isolation) — **no Docker,
-no local Postgres.** Create a **second, separate Neon project or branch**
-dedicated to tests (Neon branches are free and instant — Console → your
-project → **Branches** → **New branch** — a test branch this suite freely
-TRUNCATEs is much safer than pointing it at your dev database), then:
+The PostgreSQL integration suite exercises the real HTTP layer, Better Auth,
+database triggers, tenant isolation, and concurrent offline synchronization.
+It truncates its database between tests: **never point it at production or a
+database containing data you need**.
+
+For a local PostgreSQL test database, apply the full migration history and
+run the suite:
 
 ```bash
-DATABASE_URL=<your-neon-TEST-branch-connection-string> \
-BETTER_AUTH_SECRET=<any-random-32+-char-string-for-tests> \
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/boutica_test \
+BETTER_AUTH_SECRET=<random-test-secret-of-at-least-32-characters> \
 BETTER_AUTH_URL=http://localhost:3000 \
-  npm run db:push
+CORS_ORIGIN=http://localhost:3000,http://localhost:5173 \
+  npm run db:migrate
 
-DATABASE_URL=<same-test-branch-url> \
-BETTER_AUTH_SECRET=<same-value-as-above> \
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/boutica_test \
+BETTER_AUTH_SECRET=<same-test-secret> \
 BETTER_AUTH_URL=http://localhost:3000 \
+CORS_ORIGIN=http://localhost:3000,http://localhost:5173 \
   npm run test:e2e
 ```
 
-`BETTER_AUTH_SECRET`/`BETTER_AUTH_URL`/`DATABASE_URL` must all be set
-**before** the test process starts, not just before the tests that need a
-database run — `src/auth/auth.ts` builds the Better Auth instance (and
-validates these three vars via `envSchema.parse(process.env)`) at module
-load time, which happens as soon as anything imports `AppModule`.
+GitHub Actions runs the same migration, lint, unit-test, PostgreSQL e2e, and
+TypeScript build checks on pushes to `main` and pull requests. The CI job uses
+an ephemeral PostgreSQL 16 service; it does not connect to Neon or production.
 
-**Note on this deliverable:** the sandbox this backend was audited and
-rewritten in has no network access and no Postgres/Neon reachable from it,
-so none of `npm install`, `npm run build`, `npm test`, or `npm run test:e2e`
-could actually be executed here — this was already true for v1.1/v1.2 and
-remains true for v2.0. Every file was written and manually cross-checked
-(types, imports, and — for the parts of this migration that depend on
-Better Auth and Neon specifically — verified against each library's current
-documentation rather than training-data memory alone, since Better Auth in
-particular is young enough to have moved since then). You should treat the
-very first `npm install && npm run build && npm test && npm run test:e2e`
-locally as part of reviewing this delivery, not a formality. See
-AUDIT_REPORT.md section H for the full list of what still needs a real run,
-and exactly which parts of the Better Auth integration carry the most
-residual risk.
 
 ## Scripts
 
@@ -313,8 +309,19 @@ Store/Business — see AUDIT_REPORT.md section D for how each is modeled, and
    - **Start Command** : `npm run start:prod`
    - **Health Check Path** : `/health`
 4. Variables d'environnement requises (dans l'onglet *Environment*) :
-   - `DATABASE_URL` : URL de connexion directe Neon PostgreSQL
-   - `BETTER_AUTH_SECRET` : Clé secrète (32+ caractères)
-   - `BETTER_AUTH_URL` : URL publique Render (ex: `https://votre-app.onrender.com`)
-   - `NODE_ENV` : `production`
-   - `CORS_ORIGIN` : Origine autorisée du client (ex: `http://localhost:3000` en dév, ou URL de prod)
+   - `DATABASE_URL` : URL de connexion Neon PostgreSQL
+   - `BETTER_AUTH_SECRET` : clé aléatoire (32+ caractères)
+   - `BETTER_AUTH_URL` : URL publique Render
+   - `NODE_ENV=production`
+   - `CORS_ORIGIN` : origines HTTPS autorisées du client
+   - `ARCJET_KEY` : clé Arcjet active (obligatoire en production)
+   - `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_BUCKET`,
+     `OBJECT_STORAGE_REGION`, `OBJECT_STORAGE_ACCESS_KEY_ID`,
+     `OBJECT_STORAGE_SECRET_ACCESS_KEY` : accès à un stockage objet S3-compatible
+     (Cloudflare R2, AWS S3 ou équivalent). Le système de fichiers Render
+     éphémère n'est jamais utilisé comme stockage média de production.
+
+5. Appliquer la migration `0010_atomic_user_business_provisioning` à la base
+   Neon avant de déployer la version applicative qui s'appuie sur ses triggers.
+   Tester d'abord sur une branche Neon de préproduction. Ne pas utiliser
+   `db:push` pour remplacer cette migration.
