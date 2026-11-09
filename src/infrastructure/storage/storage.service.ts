@@ -65,9 +65,15 @@ export class StorageService {
     const mime=MIME_EXTENSION_MAP[this.extension(mimeOrKey)];
     return mime && IMAGE_TYPES.has(mime) ? 'image':'raw';
   }
+  private cloudinaryPublicId(type:'image'|'raw',key:string): string {
+    if (type === 'raw') return key;
+    const extension = this.extension(key);
+    return extension ? key.slice(0, -extension.length) : key;
+  }
   private deliveryUrl(type:'image'|'raw',key:string): string {
     this.ensureConfigured();
-    return `https://res.cloudinary.com/${this.cloudName}/${type}/upload/${key.split('/').map(encodeURIComponent).join('/')}`;
+    const publicId = this.cloudinaryPublicId(type,key);
+    return `https://res.cloudinary.com/${this.cloudName}/${type}/upload/${publicId.split('/').map(encodeURIComponent).join('/')}`;
   }
   private sign(params: Record<string,string|number|boolean>): string {
     this.ensureConfigured();
@@ -109,7 +115,8 @@ export class StorageService {
     this.ensureConfigured(); this.validateBusinessId(businessId); this.validateMimeType(mimeType); this.validateSize(buffer.length); this.validateFileSignature(buffer,mimeType);
     const key=expectedKey?this.validateKey(businessId,expectedKey):this.buildKey(businessId,folder,filename);
     const type=this.resourceType(mimeType), timestamp=Math.floor(Date.now()/1000);
-    const params={public_id:key,timestamp,overwrite:false,unique_filename:false,use_filename:false};
+    const publicId=this.cloudinaryPublicId(type,key);
+    const params={public_id:publicId,timestamp,overwrite:false,unique_filename:false,use_filename:false};
     const form=new FormData();
     form.append('file',new Blob([new Uint8Array(buffer)],{type:mimeType}),this.sanitizeFilename(filename));
     form.append('api_key',this.apiKey!);
@@ -119,7 +126,7 @@ export class StorageService {
     try { response=await fetch(`https://api.cloudinary.com/v1_1/${this.cloudName}/${type}/upload`,{method:'POST',body:form,signal:AbortSignal.timeout(30000)}); }
     catch(e) { this.logger.error('Cloudinary upload request failed',e instanceof Error?e.stack:undefined); throw new InternalServerErrorException('Impossible de joindre Cloudinary'); }
     const payload=await response.json().catch(()=>({})) as any;
-    if(!response.ok||payload.public_id!==key||!payload.secure_url) {
+    if(!response.ok||payload.public_id!==publicId||!payload.secure_url) {
       this.logger.error(`Cloudinary upload failed HTTP ${response.status}: ${payload.error?.message||'invalid response'}`);
       throw new InternalServerErrorException('Cloudinary n’a pas pu enregistrer le média');
     }
@@ -140,9 +147,10 @@ export class StorageService {
   async deleteFile(businessId:string,key:string):Promise<{success:boolean}> {
     this.ensureConfigured();
     const safe=this.validateKey(businessId,key),type=this.resourceType(safe),timestamp=Math.floor(Date.now()/1000);
-    const params={public_id:safe,timestamp,type:'upload',invalidate:true};
+    const publicId=this.cloudinaryPublicId(type,safe);
+    const params={public_id:publicId,timestamp,type:'upload',invalidate:true};
     const form=new FormData();
-    form.append('public_id',safe); form.append('timestamp',String(timestamp)); form.append('type','upload');
+    form.append('public_id',publicId); form.append('timestamp',String(timestamp)); form.append('type','upload');
     form.append('invalidate','true'); form.append('api_key',this.apiKey!); form.append('signature',this.sign(params));
     let response:Response;
     try { response=await fetch(`https://api.cloudinary.com/v1_1/${this.cloudName}/${type}/destroy`,{method:'POST',body:form,signal:AbortSignal.timeout(20000)}); }
