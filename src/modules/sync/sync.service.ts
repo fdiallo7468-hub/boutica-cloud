@@ -309,6 +309,27 @@ export class SyncService {
                   throw new BadRequestException('Sale amounts must be finite non-negative numbers');
                 }
               }
+              const computedSubtotalCents = p.items.reduce((sum: number, item: any) => {
+                const unitPrice = Number(item?.unitPrice);
+                if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+                  throw new BadRequestException('Sale item unit prices must be finite non-negative numbers');
+                }
+                if (item.costAtSale !== undefined && item.costAtSale !== null &&
+                    (!Number.isFinite(Number(item.costAtSale)) || Number(item.costAtSale) < 0)) {
+                  throw new BadRequestException('Sale item costAtSale must be a finite non-negative number');
+                }
+                return sum + Math.round(unitPrice * 100) * item.quantity;
+              }, 0);
+              const subtotalCents = Math.round(Number(p.subtotal) * 100);
+              const discountCents = Math.round(Number(p.discount ?? 0) * 100);
+              const totalCents = Math.round(Number(p.total) * 100);
+              if (
+                subtotalCents !== computedSubtotalCents ||
+                discountCents > subtotalCents ||
+                totalCents !== subtotalCents - discountCents
+              ) {
+                throw new BadRequestException('Sale subtotal, discount and total do not match the submitted sale items');
+              }
               if (p.customerId) {
                 const [customer] = await tx
                   .select({ id: customers.id })
@@ -336,6 +357,7 @@ export class SyncService {
                   .innerJoin(products, eq(variants.productId, products.id))
                   .where(and(
                     eq(variants.id, item.variantId),
+                    eq(variants.businessId, tenant.businessId),
                     eq(products.businessId, tenant.businessId),
                   ))
                   .limit(1);
