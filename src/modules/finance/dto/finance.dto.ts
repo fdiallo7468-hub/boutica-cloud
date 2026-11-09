@@ -1,4 +1,5 @@
 import {
+  IsDateString,
   IsEnum,
   IsNotEmpty,
   IsNumber,
@@ -6,6 +7,7 @@ import {
   IsPositive,
   IsString,
   IsUUID,
+  Min,
   Length,
 } from 'class-validator';
 
@@ -74,13 +76,16 @@ export class CreateReceivableFromSaleDto {
   @IsNotEmpty()
   customerId!: string;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
   totalAmount!: number;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   amountPaidNow!: number;
 
   @IsOptional()
+  @IsDateString()
   dueDate?: string;
 
   @IsOptional()
