@@ -50,8 +50,10 @@ export class NotificationOutboxService {
       return { id: record.id, deduplicationKey: record.deduplicationKey };
     } catch (err: any) {
       this.logger.error(`Erreur d'enregistrement outbox : ${err.message}`);
-      // L'outbox ne doit pas faire échouer une opération métier critique
-      return { id: 'failed', deduplicationKey: event.deduplicationKey };
+      // The outbox write is part of the caller's business transaction.
+      // Propagate the error so the business write rolls back as well; silently
+      // accepting a missing event would break the transactional-outbox guarantee.
+      throw err;
     }
   }
 
