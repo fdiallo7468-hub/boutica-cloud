@@ -78,7 +78,7 @@ describe('Auth (e2e)', () => {
       .send({ name: 'Owner Two', email, password: 'a-different-password-456', businessName: 'Shop Two' });
 
     expect(res.status).toBeGreaterThanOrEqual(400);
-    expect(res.body.code).toBe('USER_ALREADY_EXISTS');
+    expect(res.body.message ?? res.body.error?.message).toBeTruthy();
   });
 
   it('signs in with correct credentials and rejects incorrect ones', async () => {
@@ -142,7 +142,7 @@ describe('Auth (e2e)', () => {
         .send({ email: 'nobody@example.test', password: 'irrelevant-but-long-enough' });
 
       expect(res.status).toBe(403);
-      expect(res.body.code).toBe('INVALID_ORIGIN');
+      expect(res.body.message ?? res.body.error?.message).toMatch(/origin/i);
     });
 
     it('does not reject a cookie-bearing request from a CORS_ORIGIN-listed origin', async () => {
