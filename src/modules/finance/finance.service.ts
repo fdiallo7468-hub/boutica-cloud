@@ -316,8 +316,8 @@ export class FinanceService {
       .from(customers)
       .where(and(eq(customers.id, dto.customerId), eq(customers.businessId, tenant.businessId)));
 
-    if (!customer) {
-      throw new NotFoundException('Un client identifié est obligatoire pour une vente à crédit');
+    if (!customer || !customer.isActive) {
+      throw new NotFoundException('Un client actif identifié est obligatoire pour une vente à crédit');
     }
 
     const dueDate = dto.dueDate ? new Date(dto.dueDate) : null;
