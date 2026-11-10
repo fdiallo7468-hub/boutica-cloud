@@ -33,6 +33,35 @@ export const businesses = pgTable('businesses', {
 });
 
 /**
+ * v3 — Physical or operational locations belonging to a business tenant.
+ * A business always has one active default location; operational records
+ * will progressively receive a location_id in additive follow-up migrations.
+ */
+export const businessLocations = pgTable(
+  'business_locations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    code: text('code').notNull(),
+    name: text('name').notNull(),
+    address: text('address'),
+    phone: text('phone'),
+    isDefault: boolean('is_default').notNull().default(false),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessCodeUnique: uniqueIndex('business_locations_business_code_unique').on(t.businessId, t.code),
+    oneDefaultPerBusiness: uniqueIndex('business_locations_one_default_per_business_unique')
+      .on(t.businessId)
+      .where(sql`${t.isDefault} = true`),
+    businessIdx: index('business_locations_business_idx').on(t.businessId),
+    activeIdx: index('business_locations_active_idx').on(t.businessId, t.isActive),
+  }),
+);
+
+/**
  * Activités commerciales d'une entreprise (secteur Quincaillerie et Électronique).
  * Une entreprise peut posséder plusieurs activités compatibles.
  * Le retrait d'une activité passe is_active à false sans jamais supprimer de données historiques.
