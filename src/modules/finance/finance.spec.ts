@@ -183,7 +183,7 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
           from: () => ({
             where: () => ({ for: () => Promise.resolve([existingReceivable]) }),
           }),
-        });
+        })
         // 3. Default location fallback when the receivable fixture has no location.
         .mockReturnValueOnce({
           from: () => ({ where: () => Promise.resolve([{ id: 'location-main' }]) }),
