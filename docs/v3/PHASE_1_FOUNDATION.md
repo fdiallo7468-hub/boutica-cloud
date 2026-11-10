@@ -114,3 +114,27 @@ Requirements:
 - Do not execute `drizzle-kit push` against Neon production.
 - Do not run migration `0011` or any new migration in production without confirming the live migration state and reviewing the exact SQL.
 - Do not claim runtime tests pass unless they were actually executed and the results are available.
+
+
+## Implementation update — location and permission foundation
+
+The following v3 implementation has now been added on the feature branch:
+
+- `business_locations` Drizzle model with tenant ownership, unique business/code constraint, and a partial unique index enforcing at most one default location per business.
+- Migration `0012_business_locations.sql`, which creates the table, backfills one deterministic `MAIN` location for every existing business, and installs a database trigger so new businesses receive a primary location regardless of which application creation path is used.
+- Authenticated location API:
+  - `GET /api/v1/business/locations`
+  - `POST /api/v1/business/locations`
+  - `PATCH /api/v1/business/locations/:locationId`
+  - `POST /api/v1/business/locations/:locationId/default`
+- Server-side permission metadata and guard. The guard resolves the active business from the persisted user row, verifies the corresponding `business_members` membership, checks that the session business context is current, and then evaluates the membership role.
+- Initial role policy: OWNER can manage locations; STAFF can list locations but cannot create, update, deactivate, or switch the default location.
+- Unit tests for role separation and location cross-tenant update/default-selection denial.
+
+### Scope boundary
+
+This increment establishes the location entity, tenant-scoped management API, and access-control foundation. It does **not** yet route sales, stock, purchasing, expenses, receivables, or payments to a selected location. That operational data migration and API integration is the next step after this foundation passes CI and review.
+
+### Validation status
+
+GitHub Actions CI has been triggered for the latest feature-branch commit. The migration is configured for the CI-owned PostgreSQL service; it has not been run against production Neon. Build, lint, unit and PostgreSQL integration results must be green before this PR is considered ready.
