@@ -47,7 +47,9 @@ WHERE NOT EXISTS (
 CREATE OR REPLACE FUNCTION public.boutica_create_default_business_location()
 RETURNS trigger
 LANGUAGE plpgsql
-AS $$
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $
 BEGIN
   INSERT INTO public.business_locations (
     business_id, code, name, address, phone, is_default, is_active
@@ -67,3 +69,6 @@ CREATE TRIGGER businesses_create_default_location_after_insert
 AFTER INSERT ON public.businesses
 FOR EACH ROW
 EXECUTE FUNCTION public.boutica_create_default_business_location();
+--> statement-breakpoint
+-- The trigger is the only entry point; the function executes with the table owner's rights.
+REVOKE ALL ON FUNCTION public.boutica_create_default_business_location() FROM PUBLIC;
