@@ -53,6 +53,7 @@ export const businessLocations = pgTable(
   },
   (t) => ({
     businessCodeUnique: uniqueIndex('business_locations_business_code_unique').on(t.businessId, t.code),
+    businessIdIdUnique: uniqueIndex('business_locations_business_id_id_unique').on(t.businessId, t.id),
     oneDefaultPerBusiness: uniqueIndex('business_locations_one_default_per_business_unique')
       .on(t.businessId)
       .where(sql`${t.isDefault} = true`),
@@ -276,6 +277,7 @@ export const variants = pgTable(
     skuPerBusinessIdx: uniqueIndex('variants_business_sku_unique').on(t.businessId, t.sku),
     productIdx: index('variants_product_idx').on(t.productId),
     businessIdx: index('variants_business_idx').on(t.businessId),
+    businessIdIdUnique: uniqueIndex('variants_business_id_id_unique').on(t.businessId, t.id),
     sellingGtePurchase: check('variant_selling_gte_purchase', sql`${t.sellingPrice} >= ${t.purchasePrice}`),
     pricesNonNegative: check('variant_prices_non_negative', sql`${t.purchasePrice} >= 0 AND ${t.sellingPrice} >= 0`),
   }),
@@ -326,11 +328,31 @@ export const stock = pgTable(
   }),
 );
 
+/** Per-location stock balance. The legacy stock table remains the compatibility aggregate during v3 rollout. */
+export const inventoryBalances = pgTable(
+  'inventory_balances',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    locationId: uuid('location_id').notNull(),
+    variantId: uuid('variant_id').notNull(),
+    quantity: integer('quantity').notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    scopeUnique: uniqueIndex('inventory_balances_scope_unique').on(t.businessId, t.locationId, t.variantId),
+    businessVariantIdx: index('inventory_balances_business_variant_idx').on(t.businessId, t.variantId),
+    businessLocationIdx: index('inventory_balances_business_location_idx').on(t.businessId, t.locationId),
+    quantityNonNegative: check('inventory_balances_quantity_non_negative', sql`${t.quantity} >= 0`),
+  }),
+);
+
 export const stockMovements = pgTable(
   'stock_movements',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     businessId: uuid('business_id').notNull().references(() => businesses.id),
+    locationId: uuid('location_id').notNull(),
     variantId: uuid('variant_id').notNull().references(() => variants.id),
     type: movementType('type').notNull(),
     quantity: integer('quantity').notNull(),
@@ -357,6 +379,7 @@ export const suppliers = pgTable('suppliers', {
 export const purchases = pgTable('purchases', {
   id: uuid('id').defaultRandom().primaryKey(),
   businessId: uuid('business_id').notNull().references(() => businesses.id),
+  locationId: uuid('location_id').notNull(),
   supplierId: uuid('supplier_id').references(() => suppliers.id),
   status: purchaseStatus('status').notNull().default('DRAFT'),
   total: numeric('total', { precision: 14, scale: 2 }).notNull().default('0'),
@@ -388,6 +411,7 @@ export const sales = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     businessId: uuid('business_id').notNull().references(() => businesses.id),
+    locationId: uuid('location_id').notNull(),
     customerId: uuid('customer_id').references(() => customers.id),
     status: saleStatus('status').notNull().default('DRAFT'),
     subtotal: numeric('subtotal', { precision: 14, scale: 2 }).notNull().default('0'),
@@ -421,6 +445,7 @@ export const saleItems = pgTable('sale_items', {
 export const expenses = pgTable('expenses', {
   id: uuid('id').defaultRandom().primaryKey(),
   businessId: uuid('business_id').notNull().references(() => businesses.id),
+  locationId: uuid('location_id').notNull(),
   category: text('category').notNull(),
   description: text('description'),
   amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
@@ -539,6 +564,7 @@ export const receivables = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    locationId: uuid('location_id').notNull(),
     customerId: uuid('customer_id').notNull().references(() => customers.id),
     saleId: uuid('sale_id').notNull().references(() => sales.id, { onDelete: 'cascade' }),
     initialAmount: numeric('initial_amount', { precision: 14, scale: 2 }).notNull(),
@@ -564,6 +590,7 @@ export const payments = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    locationId: uuid('location_id').notNull(),
     customerId: uuid('customer_id').notNull().references(() => customers.id),
     saleId: uuid('sale_id').references(() => sales.id),
     receivableId: uuid('receivable_id').references(() => receivables.id),
