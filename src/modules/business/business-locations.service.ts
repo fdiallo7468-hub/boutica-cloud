@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, asc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { DatabaseService } from "../../infrastructure/database/database";
 import { businessLocations } from "../../infrastructure/database/schema";
 import {
@@ -20,7 +20,7 @@ export class BusinessLocationsService {
       .select()
       .from(businessLocations)
       .where(eq(businessLocations.businessId, businessId))
-      .orderBy(asc(businessLocations.isDefault), asc(businessLocations.name));
+      .orderBy(desc(businessLocations.isDefault), businessLocations.name);
   }
 
   async create(businessId: string, dto: CreateBusinessLocationDto) {
