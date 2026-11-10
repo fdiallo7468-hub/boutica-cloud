@@ -2,6 +2,10 @@ import { ServiceUnavailableException } from '@nestjs/common';
 import type { DatabaseService } from '../../infrastructure/database/database';
 import { HealthController } from './health.controller';
 
+jest.mock('@thallesp/nestjs-better-auth', () => ({
+  Public: () => () => undefined,
+}));
+
 describe('HealthController', () => {
   const db = {
     db: {
