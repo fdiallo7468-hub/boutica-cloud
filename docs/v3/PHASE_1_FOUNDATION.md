@@ -138,3 +138,24 @@ This increment establishes the location entity, tenant-scoped management API, an
 ### Validation status
 
 GitHub Actions CI has been triggered for the latest feature-branch commit. The migration is configured for the CI-owned PostgreSQL service; it has not been run against production Neon. Build, lint, unit and PostgreSQL integration results must be green before this PR is considered ready.
+
+
+## Implementation update — audit and transaction-scoped tenant context
+
+The next security increment has been added to the feature branch:
+
+- Migration `0013_append_only_audit_events.sql` creates `audit_events`, with tenant, optional actor/location, action, resource, request ID, minimized JSON metadata and server timestamp.
+- A database trigger rejects UPDATE and DELETE attempts against audit rows. Public UPDATE/DELETE/TRUNCATE privileges are revoked. Business deletion is restricted while audit history exists; actor deletion nulls the actor reference rather than deleting history.
+- `AuditEventsService` exposes an INSERT-only append operation using parameterized SQL. It deliberately exposes no mutation method.
+- `TenantTransactionService` checks out one PoolClient, starts a transaction, applies `app.business_id`, `app.actor_user_id` and `app.request_id` using transaction-local `set_config(..., true)`, then commits or rolls back before releasing the connection.
+- Unit tests cover tenant context setup, rollback/release behavior, missing tenant rejection, audit insertion and metadata validation.
+
+### Important security boundary
+
+The transaction helper is now available through the global database module, but existing controllers/services have **not** all been migrated to use it. The current API request path still uses the existing Better Auth tenant decorator and direct Drizzle pool queries. Therefore these transaction-local variables are not yet guaranteed on every request, and **no RLS policies have been enabled**. The helper is a prerequisite, not proof that tenant isolation is complete.
+
+Before RLS activation, each tenant-owned table and every read/write/background-job path must be migrated to the transaction boundary and covered by cross-tenant integration tests. The audit writer must also be called from the same transaction as each sensitive business operation; merely creating the table does not mean all operations are audited.
+
+### Latest validation
+
+The earlier location/permission increment passed the full CI workflow (migration replay, lint, unit tests, PostgreSQL integration tests and production TypeScript build) on commit `ec3746d3287117fa0be6d3766e73531a3f2c7f9d`. A new CI run is in progress for the audit/tenant-context increment. Do not treat the new increment as validated until that run completes successfully.
