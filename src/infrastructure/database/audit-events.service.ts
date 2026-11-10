@@ -31,6 +31,12 @@ export class AuditEventsService {
       [event.businessId, event.actorUserId ?? null, event.locationId ?? null, action, resourceType,
        event.resourceId ?? null, event.requestId ?? null, JSON.stringify(metadata)],
     );
-    return result.rows[0].id;
+
+    const insertedEvent = result.rows[0];
+    if (!insertedEvent) {
+      throw new Error("Audit event insert did not return an id");
+    }
+
+    return insertedEvent.id;
   }
 }
