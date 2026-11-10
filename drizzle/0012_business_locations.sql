@@ -49,7 +49,7 @@ RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, public
-AS $
+AS $function$
 BEGIN
   INSERT INTO public.business_locations (
     business_id, code, name, address, phone, is_default, is_active
@@ -61,7 +61,7 @@ BEGIN
 
   RETURN NEW;
 END;
-$$;
+$function$;
 --> statement-breakpoint
 DROP TRIGGER IF EXISTS businesses_create_default_location_after_insert ON public.businesses;
 --> statement-breakpoint
