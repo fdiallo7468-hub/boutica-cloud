@@ -82,14 +82,29 @@ export class BusinessLocationsService {
     if (dto.phone !== undefined) updates.phone = dto.phone?.trim() || null;
     if (dto.isActive !== undefined) updates.isActive = dto.isActive;
 
+    const updateConditions = [
+      eq(businessLocations.id, locationId),
+      eq(businessLocations.businessId, businessId),
+    ];
+
+    // Prevent a concurrent default-location switch from allowing the new
+    // primary location to be deactivated using a stale pre-read.
+    if (dto.isActive === false) {
+      updateConditions.push(eq(businessLocations.isDefault, false));
+    }
+
     const [updated] = await this.database.db
       .update(businessLocations)
       .set(updates)
-      .where(and(
-        eq(businessLocations.id, locationId),
-        eq(businessLocations.businessId, businessId),
-      ))
+      .where(and(...updateConditions))
       .returning();
+
+    if (!updated && dto.isActive === false) {
+      throw new BadRequestException(
+        "L'établissement principal ne peut pas être désactivé",
+      );
+    }
+    if (!updated) throw new NotFoundException("Établissement introuvable");
 
     return updated;
   }
