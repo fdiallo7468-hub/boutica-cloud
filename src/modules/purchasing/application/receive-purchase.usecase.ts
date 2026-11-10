@@ -119,7 +119,7 @@ export class ReceivePurchaseUseCase {
           .values({ businessId: tenant.businessId, locationId: location.id, variantId: item.variantId, quantity: item.quantity.value })
           .onConflictDoUpdate({
             target: [inventoryBalances.businessId, inventoryBalances.locationId, inventoryBalances.variantId],
-            set: { quantity: sql\`${inventoryBalances.quantity} + ${item.quantity.value}\`, updatedAt: new Date() },
+            set: { quantity: sql`${inventoryBalances.quantity} + ${item.quantity.value}`, updatedAt: new Date() },
           });
 
         await tx.insert(stockMovements).values({
