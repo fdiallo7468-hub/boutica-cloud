@@ -9,6 +9,7 @@ import { and, desc, eq, lte } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
 import {
   businesses,
+  businessLocations,
   customers,
   paymentCancellations,
   payments,
@@ -56,6 +57,7 @@ export class FinanceService {
 
     const execute = async (tx: any) => {
       let targetReceivable: typeof receivables.$inferSelect | null = null;
+      let saleLocationId: string | null = null;
 
       // A supplied saleId must belong to this tenant and to the same customer.
       if (dto.saleId) {
@@ -71,6 +73,7 @@ export class FinanceService {
         if (!sale) {
           throw new NotFoundException('Vente introuvable pour cette entreprise');
         }
+        saleLocationId = sale.locationId;
         if (sale.status !== 'COMPLETED' || sale.customerId !== dto.customerId) {
           throw new BadRequestException('Le paiement doit correspondre au client d’une vente terminée');
         }
@@ -113,13 +116,23 @@ export class FinanceService {
         }
 
         targetReceivable = rec;
+        saleLocationId = rec.locationId;
       }
+
+      const [defaultLocation] = await tx.select({ id: businessLocations.id }).from(businessLocations).where(and(
+        eq(businessLocations.businessId, tenant.businessId),
+        eq(businessLocations.isDefault, true),
+        eq(businessLocations.isActive, true),
+      ));
+      const paymentLocationId = saleLocationId ?? defaultLocation?.id;
+      if (!paymentLocationId) throw new BadRequestException('No active default business location is configured');
 
       // 3. Insérer le paiement
       const [payment] = await tx
         .insert(payments)
         .values({
           businessId: tenant.businessId,
+          locationId: paymentLocationId,
           customerId: dto.customerId,
           saleId: dto.saleId || targetReceivable?.saleId || null,
           receivableId: dto.receivableId || null,
@@ -382,6 +395,7 @@ export class FinanceService {
         .insert(receivables)
         .values({
           businessId: tenant.businessId,
+          locationId: sale.locationId,
           customerId: dto.customerId,
           saleId: sale.id,
           initialAmount: totalAmount.toFixed(2),
