@@ -2,7 +2,7 @@ import { Controller, Get, NotFoundException, Param, ParseUUIDPipe, Post, Body } 
 import { ApiTags } from '@nestjs/swagger';
 import { and, eq } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
-import { stock, stockMovements, variants } from '../../infrastructure/database/schema';
+import { businessLocations, inventoryBalances, stock, stockMovements, variants } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { Tenant } from '../auth/tenant.type';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
@@ -31,6 +31,13 @@ export class InventoryController {
   @Post(':variantId/adjust')
   async adjust(@CurrentTenant() tenant: Tenant, @Param('variantId', ParseUUIDPipe) variantId: string, @Body() body: AdjustStockDto) {
     return this.db.db.transaction(async (tx) => {
+      const [location] = await tx.select({ id: businessLocations.id }).from(businessLocations).where(and(
+        eq(businessLocations.businessId, tenant.businessId),
+        eq(businessLocations.isDefault, true),
+        eq(businessLocations.isActive, true),
+      ));
+      if (!location) throw new NotFoundException('No active default business location is configured');
+
       const [variant] = await tx
         .select({ id: variants.id })
         .from(variants)
@@ -51,11 +58,19 @@ export class InventoryController {
         .onConflictDoUpdate({ target: stock.variantId, set: { quantity: body.quantity, updatedAt: new Date() } })
         .returning();
 
+      await tx.insert(inventoryBalances)
+        .values({ businessId: tenant.businessId, locationId: location.id, variantId, quantity: body.quantity })
+        .onConflictDoUpdate({
+          target: [inventoryBalances.businessId, inventoryBalances.locationId, inventoryBalances.variantId],
+          set: { quantity: body.quantity, updatedAt: new Date() },
+        });
+
       // FIX (P2-2): manual adjustments used to bypass stock_movements
       // entirely, silently breaking the audit trail the table exists for.
       if (delta !== 0) {
         await tx.insert(stockMovements).values({
           businessId: tenant.businessId,
+          locationId: location.id,
           variantId,
           type: 'ADJUSTMENT',
           quantity: delta,

@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable } from '@nestjs/comm
 import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../../infrastructure/database/database';
-import { businesses, customers, idempotencyKeys, saleItems, sales, stock, stockMovements, variants } from '../../../infrastructure/database/schema';
+import { businesses, businessLocations, customers, idempotencyKeys, inventoryBalances, saleItems, sales, stock, stockMovements, variants } from '../../../infrastructure/database/schema';
 import { Money, Quantity } from '../../../common/domain';
 import { hashRequestPayload } from '../../../common/idempotency/idempotency.util';
 import { Tenant } from '../../auth/tenant.type';
@@ -52,6 +52,12 @@ export class CreateSaleUseCase {
 
       const [business] = await tx.select().from(businesses).where(eq(businesses.id, tenant.businessId));
       const currency = business?.currency ?? 'XOF';
+      const [location] = await tx.select({ id: businessLocations.id }).from(businessLocations).where(and(
+        eq(businessLocations.businessId, tenant.businessId),
+        eq(businessLocations.isDefault, true),
+        eq(businessLocations.isActive, true),
+      ));
+      if (!location) throw new BadRequestException('No active default business location is configured');
 
       if (dto.customerId) {
         const [customer] = await tx
@@ -141,6 +147,7 @@ export class CreateSaleUseCase {
         .values({
           id: saleId,
           businessId: tenant.businessId,
+          locationId: location.id,
           customerId: dto.customerId,
           subtotal: subtotal.toDecimalString(),
           discount: discount.toDecimalString(),
@@ -186,8 +193,17 @@ export class CreateSaleUseCase {
           .set({ quantity: sql`${stock.quantity} - ${item.quantity.value}`, updatedAt: new Date() })
           .where(and(eq(stock.variantId, item.variantId), eq(stock.businessId, tenant.businessId)));
 
+        await tx.update(inventoryBalances)
+          .set({ quantity: sql`${inventoryBalances.quantity} - ${item.quantity.value}`, updatedAt: new Date() })
+          .where(and(
+            eq(inventoryBalances.businessId, tenant.businessId),
+            eq(inventoryBalances.locationId, location.id),
+            eq(inventoryBalances.variantId, item.variantId),
+          ));
+
         await tx.insert(stockMovements).values({
           businessId: tenant.businessId,
+          locationId: location.id,
           variantId: item.variantId,
           type: 'SALE',
           quantity: -item.quantity.value,

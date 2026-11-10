@@ -4,6 +4,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../../infrastructure/database/database';
 import {
   businesses,
+  inventoryBalances,
   idempotencyKeys,
   returnItems,
   returns,
@@ -141,6 +142,12 @@ export class CreateReturnUseCase {
               target: stock.variantId,
               set: { quantity: sql`${stock.quantity} + ${item.quantity.value}`, updatedAt: new Date() },
             });
+          await tx.insert(inventoryBalances)
+            .values({ businessId: tenant.businessId, locationId: sale.locationId, variantId: item.variantId, quantity: item.quantity.value })
+            .onConflictDoUpdate({
+              target: [inventoryBalances.businessId, inventoryBalances.locationId, inventoryBalances.variantId],
+              set: { quantity: sql`${inventoryBalances.quantity} + ${item.quantity.value}`, updatedAt: new Date() },
+            });
         }
 
         // Movement quantity always reflects the actual physical count for
@@ -149,6 +156,7 @@ export class CreateReturnUseCase {
         // distinction is carried by `type`, not by zeroing the quantity.
         await tx.insert(stockMovements).values({
           businessId: tenant.businessId,
+          locationId: sale.locationId,
           variantId: item.variantId,
           type: item.condition === 'RESTOCK' ? 'RETURN' : 'DAMAGE',
           quantity: item.quantity.value,

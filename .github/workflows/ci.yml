@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main, 'feat/boutica-cloud-v3-foundation']
+    branches: [main, feat/boutica-cloud-v3-foundation]
 
 concurrency:
   group: boutica-cloud-ci-${{ github.ref }}
