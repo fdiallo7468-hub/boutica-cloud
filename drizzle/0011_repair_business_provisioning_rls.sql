@@ -12,7 +12,8 @@ ALTER TABLE public.businesses DISABLE ROW LEVEL SECURITY;
 --> statement-breakpoint
 -- Trigger functions are owned by neondb_owner (the businesses table owner).
 -- SECURITY DEFINER lets atomic provisioning execute with that owner so the
--- BEFORE INSERT trigger is not blocked by table-level RLS settings.
+-- provisioning triggers can create business rows even when the invoking
+-- application role has no direct privileges on the businesses table.
 ALTER FUNCTION public.boutica_provision_user_business()
   SECURITY DEFINER;
 --> statement-breakpoint
@@ -25,10 +26,9 @@ ALTER FUNCTION public.boutica_attach_user_business_membership()
 ALTER FUNCTION public.boutica_attach_user_business_membership()
   SET search_path = pg_catalog, public;
 --> statement-breakpoint
+-- PostgreSQL checks trigger-function EXECUTE permission when the trigger is
+-- created, not on every row invocation. Removing PUBLIC execute is therefore
+-- safe for the already-installed triggers and prevents direct invocation.
 REVOKE ALL ON FUNCTION public.boutica_provision_user_business() FROM PUBLIC;
 --> statement-breakpoint
 REVOKE ALL ON FUNCTION public.boutica_attach_user_business_membership() FROM PUBLIC;
---> statement-breakpoint
-GRANT EXECUTE ON FUNCTION public.boutica_provision_user_business() TO boutica_runtime;
---> statement-breakpoint
-GRANT EXECUTE ON FUNCTION public.boutica_attach_user_business_membership() TO boutica_runtime;
