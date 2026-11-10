@@ -54,6 +54,14 @@ export class PermissionGuard implements CanActivate {
       throw new ForbiddenException("Aucune entreprise active pour ce compte");
     }
 
+    const sessionBusinessId = (session.user as typeof session.user & {
+      businessId?: string | null;
+    }).businessId;
+
+    if (sessionBusinessId !== account.businessId) {
+      throw new ForbiddenException("Le contexte d'entreprise de la session n'est plus valide");
+    }
+
     const [membership] = await this.database.db
       .select({ role: businessMembers.role })
       .from(businessMembers)
