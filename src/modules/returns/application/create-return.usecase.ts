@@ -142,6 +142,12 @@ export class CreateReturnUseCase {
               target: stock.variantId,
               set: { quantity: sql`${stock.quantity} + ${item.quantity.value}`, updatedAt: new Date() },
             });
+          await tx.insert(inventoryBalances)
+            .values({ businessId: tenant.businessId, locationId: sale.locationId, variantId: item.variantId, quantity: item.quantity.value })
+            .onConflictDoUpdate({
+              target: [inventoryBalances.businessId, inventoryBalances.locationId, inventoryBalances.variantId],
+              set: { quantity: sql`${inventoryBalances.quantity} + ${item.quantity.value}`, updatedAt: new Date() },
+            });
         }
 
         // Movement quantity always reflects the actual physical count for
