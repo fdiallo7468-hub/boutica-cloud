@@ -437,16 +437,18 @@ export class SyncService {
                       },
                     });
 
-                  // Mise à jour du stock propre à l'établissement.
-                  await operationTx.insert(inventoryBalances).values({
-                    businessId: tenant.businessId,
-                    locationId: defaultLocation.id,
-                    variantId: item.variantId,
-                    quantity: -item.quantity,
-                  }).onConflictDoUpdate({
-                    target: [inventoryBalances.businessId, inventoryBalances.locationId, inventoryBalances.variantId],
-                    set: { quantity: sql`${inventoryBalances.quantity} - ${item.quantity}`, updatedAt: new Date() },
-                  });
+                  // Décrémentation du solde existant de l’établissement.
+                  // Les soldes initiaux sont créés par la migration depuis le stock legacy.
+                  await operationTx.update(inventoryBalances)
+                    .set({
+                      quantity: sql`${inventoryBalances.quantity} - ${item.quantity}`,
+                      updatedAt: new Date(),
+                    })
+                    .where(and(
+                      eq(inventoryBalances.businessId, tenant.businessId),
+                      eq(inventoryBalances.locationId, defaultLocation.id),
+                      eq(inventoryBalances.variantId, item.variantId),
+                    ));
 
                   // Mouvement de stock d'audit
                   await operationTx.insert(stockMovements).values({
