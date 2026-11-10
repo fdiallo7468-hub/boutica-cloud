@@ -194,7 +194,7 @@ export class CreateSaleUseCase {
           .where(and(eq(stock.variantId, item.variantId), eq(stock.businessId, tenant.businessId)));
 
         await tx.update(inventoryBalances)
-          .set({ quantity: sql\`${inventoryBalances.quantity} - ${item.quantity.value}\`, updatedAt: new Date() })
+          .set({ quantity: sql`${inventoryBalances.quantity} - ${item.quantity.value}`, updatedAt: new Date() })
           .where(and(
             eq(inventoryBalances.businessId, tenant.businessId),
             eq(inventoryBalances.locationId, location.id),
