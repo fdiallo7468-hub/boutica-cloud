@@ -2,17 +2,96 @@
   "version": "7",
   "dialect": "postgresql",
   "entries": [
-    {"idx":0,"version":"7","when":1791098735766,"tag":"0000_flat_jack_power","breakpoints":true},
-    {"idx":1,"version":"7","when":1792664919277,"tag":"0001_auth_evolution_business_user_fields","breakpoints":true},
-    {"idx":2,"version":"7","when":1793458682639,"tag":"0002_cloudy_scarlet_spider","breakpoints":true},
-    {"idx":3,"version":"7","when":1793489554329,"tag":"0003_secret_tinkerer","breakpoints":true},
-    {"idx":4,"version":"7","when":1793489943501,"tag":"0004_clear_landau","breakpoints":true},
-    {"idx":5,"version":"7","when":1793500000000,"tag":"0005_sectors_activities_multibusiness","breakpoints":true},
-    {"idx":6,"version":"7","when":1793505000000,"tag":"0006_finance_sync_outbox","breakpoints":true},
-    {"idx":7,"version":"7","when":1794182400000,"tag":"0007_notification_finance_event_types","breakpoints":true},
-    {"idx":8,"version":"7","when":1794182401000,"tag":"0008_customer_supplier_archiving","breakpoints":true},
-    {"idx":9,"version":"7","when":1794182402000,"tag":"0009_outbox_deduplication_unique","breakpoints":true},
-    {"idx":10,"version":"7","when":1794182403000,"tag":"0010_atomic_user_business_provisioning","breakpoints":true},
-    {"idx":11,"version":"7","when":1794332280000,"tag":"0011_repair_business_provisioning_rls","breakpoints":true}
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1791098735766,
+      "tag": "0000_flat_jack_power",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792664919277,
+      "tag": "0001_auth_evolution_business_user_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793458682639,
+      "tag": "0002_cloudy_scarlet_spider",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793489554329,
+      "tag": "0003_secret_tinkerer",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793489943501,
+      "tag": "0004_clear_landau",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793500000000,
+      "tag": "0005_sectors_activities_multibusiness",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793505000000,
+      "tag": "0006_finance_sync_outbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794182400000,
+      "tag": "0007_notification_finance_event_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794182401000,
+      "tag": "0008_customer_supplier_archiving",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794182402000,
+      "tag": "0009_outbox_deduplication_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794182403000,
+      "tag": "0010_atomic_user_business_provisioning",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794332280000,
+      "tag": "0011_repair_business_provisioning_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794332281000,
+      "tag": "0012_business_locations",
+      "breakpoints": true
+    }
   ]
 }
