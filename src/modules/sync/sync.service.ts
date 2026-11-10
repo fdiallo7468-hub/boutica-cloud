@@ -2,8 +2,10 @@ import { BadRequestException, ConflictException, HttpException, Injectable, Logg
 import { and, eq, gt, or, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
 import {
+  businessLocations,
   customers,
   expenses,
+  inventoryBalances,
   offlineOperationsLog,
   payments,
   products,
@@ -307,6 +309,15 @@ export class SyncService {
 
             case 'CREATE_SALE': {
               const p = op.payload as any;
+              const [defaultLocation] = await operationTx
+                .select({ id: businessLocations.id })
+                .from(businessLocations)
+                .where(and(
+                  eq(businessLocations.businessId, tenant.businessId),
+                  eq(businessLocations.isDefault, true),
+                  eq(businessLocations.isActive, true),
+                ));
+              if (!defaultLocation) throw new BadRequestException('No active default business location is configured');
               const saleId = p.id || undefined;
 
               if (!Array.isArray(p.items) || p.items.length === 0) {
@@ -382,6 +393,7 @@ export class SyncService {
                 .values({
                   id: saleId,
                   businessId: tenant.businessId,
+                  locationId: defaultLocation.id,
                   customerId: p.customerId || null,
                   status: 'COMPLETED',
                   subtotal: p.subtotal.toString(),
@@ -425,9 +437,21 @@ export class SyncService {
                       },
                     });
 
+                  // Mise à jour du stock propre à l'établissement.
+                  await operationTx.insert(inventoryBalances).values({
+                    businessId: tenant.businessId,
+                    locationId: defaultLocation.id,
+                    variantId: item.variantId,
+                    quantity: -item.quantity,
+                  }).onConflictDoUpdate({
+                    target: [inventoryBalances.businessId, inventoryBalances.locationId, inventoryBalances.variantId],
+                    set: { quantity: sql`${inventoryBalances.quantity} - ${item.quantity}`, updatedAt: new Date() },
+                  });
+
                   // Mouvement de stock d'audit
                   await operationTx.insert(stockMovements).values({
                     businessId: tenant.businessId,
+                    locationId: defaultLocation.id,
                     variantId: item.variantId,
                     type: 'SALE',
                     quantity: -item.quantity,
@@ -477,6 +501,15 @@ export class SyncService {
 
             case 'RECORD_EXPENSE': {
               const p = op.payload as any;
+              const [defaultLocation] = await operationTx
+                .select({ id: businessLocations.id })
+                .from(businessLocations)
+                .where(and(
+                  eq(businessLocations.businessId, tenant.businessId),
+                  eq(businessLocations.isDefault, true),
+                  eq(businessLocations.isActive, true),
+                ));
+              if (!defaultLocation) throw new BadRequestException('No active default business location is configured');
               const expenseAmount = Number(p.amount);
               if (typeof p.category !== 'string' || !p.category.trim() ||
                   !Number.isFinite(expenseAmount) || expenseAmount <= 0) {
@@ -487,6 +520,7 @@ export class SyncService {
                 .values({
                   id: p.id || undefined,
                   businessId: tenant.businessId,
+                  locationId: defaultLocation.id,
                   category: p.category,
                   description: p.description || null,
                   amount: expenseAmount.toString(),
