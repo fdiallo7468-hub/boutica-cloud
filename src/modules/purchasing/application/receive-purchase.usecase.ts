@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable } from '@nestjs/comm
 import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../../infrastructure/database/database';
-import { businesses, idempotencyKeys, purchaseItems, purchases, stock, stockMovements, suppliers, variants } from '../../../infrastructure/database/schema';
+import { businesses, businessLocations, idempotencyKeys, inventoryBalances, purchaseItems, purchases, stock, stockMovements, suppliers, variants } from '../../../infrastructure/database/schema';
 import { Money, Quantity } from '../../../common/domain';
 import { hashRequestPayload } from '../../../common/idempotency/idempotency.util';
 import { Tenant } from '../../auth/tenant.type';
@@ -45,6 +45,12 @@ export class ReceivePurchaseUseCase {
 
       const [business] = await tx.select().from(businesses).where(eq(businesses.id, tenant.businessId));
       const currency = business?.currency ?? 'XOF';
+      const [location] = await tx.select({ id: businessLocations.id }).from(businessLocations).where(and(
+        eq(businessLocations.businessId, tenant.businessId),
+        eq(businessLocations.isDefault, true),
+        eq(businessLocations.isActive, true),
+      ));
+      if (!location) throw new BadRequestException('No active default business location is configured');
 
       // FIX (v2.1, client-integration audit §11): supplierId was
       // previously accepted with no ownership check at all — a caller
@@ -85,7 +91,7 @@ export class ReceivePurchaseUseCase {
 
       const [purchaseRow] = await tx
         .insert(purchases)
-        .values({ id: purchaseId, businessId: tenant.businessId, supplierId: dto.supplierId, status: 'RECEIVED', total: total.toDecimalString() })
+        .values({ id: purchaseId, businessId: tenant.businessId, locationId: location.id, supplierId: dto.supplierId, status: 'RECEIVED', total: total.toDecimalString() })
         .returning();
 
       const itemRows = [];
@@ -109,8 +115,16 @@ export class ReceivePurchaseUseCase {
             set: { quantity: sql`${stock.quantity} + ${item.quantity.value}`, updatedAt: new Date() },
           });
 
+        await tx.insert(inventoryBalances)
+          .values({ businessId: tenant.businessId, locationId: location.id, variantId: item.variantId, quantity: item.quantity.value })
+          .onConflictDoUpdate({
+            target: [inventoryBalances.businessId, inventoryBalances.locationId, inventoryBalances.variantId],
+            set: { quantity: sql\`${inventoryBalances.quantity} + ${item.quantity.value}\`, updatedAt: new Date() },
+          });
+
         await tx.insert(stockMovements).values({
           businessId: tenant.businessId,
+          locationId: location.id,
           variantId: item.variantId,
           type: 'PURCHASE',
           quantity: item.quantity.value,
