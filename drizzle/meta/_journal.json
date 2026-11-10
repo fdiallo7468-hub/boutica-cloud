@@ -92,6 +92,13 @@
       "when": 1794332281000,
       "tag": "0012_business_locations",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794340000000,
+      "tag": "0013_append_only_audit_events",
+      "breakpoints": true
     }
   ]
 }
