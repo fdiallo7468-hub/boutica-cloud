@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { randomUUID } from 'node:crypto';
-import { count, desc, eq } from 'drizzle-orm';
+import { and, count, desc, eq } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
-import { businesses, expenses } from '../../infrastructure/database/schema';
+import { businesses, businessLocations, expenses } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { Tenant } from '../auth/tenant.type';
 import { Money } from '../../common/domain';
@@ -38,12 +38,19 @@ export class ExpensesController {
     // configured currency.
     const [business] = await this.db.db.select({ currency: businesses.currency }).from(businesses).where(eq(businesses.id, tenant.businessId));
     const amount = Money.fromDecimal(body.amount, business?.currency ?? 'XOF');
+    const [location] = await this.db.db.select({ id: businessLocations.id }).from(businessLocations).where(and(
+      eq(businessLocations.businessId, tenant.businessId),
+      eq(businessLocations.isDefault, true),
+      eq(businessLocations.isActive, true),
+    ));
+    if (!location) throw new NotFoundException('Aucune localisation active par défaut n’est configurée');
     const expense = Expense.create(randomUUID(), tenant.businessId, body.category, amount, body.description);
 
     const [row] = await this.db.db
       .insert(expenses)
       .values({
         businessId: expense.businessId,
+        locationId: location.id,
         category: expense.category,
         amount: expense.amount.toDecimalString(),
         description: expense.description,
