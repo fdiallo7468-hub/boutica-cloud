@@ -84,6 +84,7 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
       mockDb.db.select
         .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([]) }) }) // customer idempotency check
         .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([]) }) }) // sale idempotency check
+        .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([{ id: 'location-main' }]) }) }) // active default location
         .mockReturnValueOnce({
           from: () => ({
             where: () => ({
