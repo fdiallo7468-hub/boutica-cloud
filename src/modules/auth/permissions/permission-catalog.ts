@@ -1,10 +1,9 @@
 /**
- * Boutica Cloud v3 permission catalogue.
+ * Boutica Cloud v3 permission catalogue and initial role policy.
  *
- * This file is intentionally declarative: it defines stable permission codes
- * without changing current route authorization. Route enforcement will be
- * introduced incrementally after the role/permission matrix and membership
- * migration are reviewed.
+ * Permissions are checked server-side. OWNER is unrestricted within its
+ * tenant; STAFF receives an explicit least-privilege operational baseline.
+ * Fine-grained per-member grants can be layered on this stable catalogue later.
  */
 export const PERMISSIONS = {
   ORGANIZATION_READ: "organization:read",
@@ -41,21 +40,45 @@ export const PERMISSIONS = {
 } as const;
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
+export type PermissionRole = "OWNER" | "STAFF";
 
 const permissionCodes = new Set<string>(Object.values(PERMISSIONS));
 
-/** Returns true only for a permission explicitly present in the resolved grant set. */
+export const ROLE_PERMISSIONS: Record<PermissionRole, readonly PermissionCode[]> = {
+  OWNER: Object.values(PERMISSIONS),
+  STAFF: [
+    PERMISSIONS.ORGANIZATION_READ,
+    PERMISSIONS.LOCATIONS_READ,
+    PERMISSIONS.CATALOG_READ,
+    PERMISSIONS.INVENTORY_READ,
+    PERMISSIONS.INVENTORY_MANAGE,
+    PERMISSIONS.PURCHASING_READ,
+    PERMISSIONS.SALES_READ,
+    PERMISSIONS.SALES_CREATE,
+    PERMISSIONS.CUSTOMERS_READ,
+    PERMISSIONS.CUSTOMERS_MANAGE,
+    PERMISSIONS.REPORTS_READ,
+    PERMISSIONS.CRM_READ,
+    PERMISSIONS.PAYMENTS_READ,
+  ],
+};
+
+export function hasRolePermission(
+  role: PermissionRole,
+  requiredPermission: PermissionCode,
+): boolean {
+  return permissionCodes.has(requiredPermission) &&
+    ROLE_PERMISSIONS[role].includes(requiredPermission);
+}
+
 export function hasPermission(
   grantedPermissions: readonly string[],
   requiredPermission: PermissionCode,
 ): boolean {
-  return (
-    permissionCodes.has(requiredPermission) &&
-    grantedPermissions.includes(requiredPermission)
-  );
+  return permissionCodes.has(requiredPermission) &&
+    grantedPermissions.includes(requiredPermission);
 }
 
-/** Rejects unknown permission strings before persisting or applying grants. */
 export function isPermissionCode(value: string): value is PermissionCode {
   return permissionCodes.has(value);
 }
