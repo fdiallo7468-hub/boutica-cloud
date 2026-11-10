@@ -2,7 +2,7 @@
 
 **Branch:** `feat/boutica-cloud-v3-phase-2-operations`  
 **Base:** Phase 1 foundation branch  
-**Status:** In progress  
+**Status:** In progress — first location-aware schema and workflow increment pushed; CI pending  
 **Compatibility target:** preserve existing `/api/v1` contracts while adding location-aware fields.
 
 ## Goals
