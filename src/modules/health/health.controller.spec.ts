@@ -1,5 +1,5 @@
 import { ServiceUnavailableException } from '@nestjs/common';
-import { DatabaseService } from '../../infrastructure/database/database';
+import type { DatabaseService } from '../../infrastructure/database/database';
 import { HealthController } from './health.controller';
 
 describe('HealthController', () => {
