@@ -14,7 +14,7 @@ import {
 import { ApiTags } from '@nestjs/swagger';
 import { and, count, eq, ilike, or, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
-import { customers, sales } from '../../infrastructure/database/schema';
+import { businessLocations, customers, sales } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { Tenant } from '../auth/tenant.type';
 import { PaginationQueryDto } from '../../common/pagination.dto';
@@ -37,7 +37,8 @@ export class CustomersController {
     if (includeArchived !== 'true') filters.push(eq(customers.isActive, true));
     const normalizedSearch = search?.trim();
     if (normalizedSearch) {
-      const pattern = `%${normalizedSearch}%`;
+      const escapedSearch = normalizedSearch.replace(/[\\%_]/g, '\\      const pattern = `%${normalizedSearch}%`;');
+      const pattern = `%${escapedSearch}%`;
       filters.push(or(ilike(customers.name, pattern), ilike(customers.phone, pattern))!);
     }
 
@@ -47,6 +48,46 @@ export class CustomersController {
     ]);
     const total = countResult[0]?.value ?? 0;
     return { data, page: query.page, pageSize: query.pageSize, total };
+  }
+
+  @Get(':id/history')
+  async history(
+    @CurrentTenant() tenant: Tenant,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('locationId') locationId?: string,
+    @Query('limit') limit = '20',
+    @Query('offset') offset = '0',
+  ) {
+    const [customer] = await this.db.db.select({ id: customers.id }).from(customers).where(and(
+      eq(customers.id, id), eq(customers.businessId, tenant.businessId),
+    ));
+    if (!customer) throw new NotFoundException('Customer not found');
+    const start = from ? new Date(from) : undefined;
+    const end = to ? new Date(to) : undefined;
+    const pageSize = Number(limit);
+    const pageOffset = Number(offset);
+    if ((start && Number.isNaN(start.getTime())) || (end && Number.isNaN(end.getTime())) ||
+      (start && end && start > end) || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100 ||
+      !Number.isInteger(pageOffset) || pageOffset < 0) {
+      throw new BadRequestException('Invalid customer history filters');
+    }
+    const filters = [eq(sales.businessId, tenant.businessId), eq(sales.customerId, id), eq(sales.status, 'COMPLETED')];
+    if (start) filters.push(gte(sales.createdAt, start));
+    if (end) filters.push(lte(sales.createdAt, end));
+    if (locationId) {
+      const [location] = await this.db.db.select({ id: businessLocations.id }).from(businessLocations).where(and(
+        eq(businessLocations.id, locationId), eq(businessLocations.businessId, tenant.businessId), eq(businessLocations.isActive, true),
+      ));
+      if (!location) throw new NotFoundException('Location not found');
+      filters.push(eq(sales.locationId, locationId));
+    }
+    const [data, countResult] = await Promise.all([
+      this.db.db.select().from(sales).where(and(...filters)).orderBy(sql`${sales.createdAt} DESC`).limit(pageSize).offset(pageOffset),
+      this.db.db.select({ value: count() }).from(sales).where(and(...filters)),
+    ]);
+    return { customerId: id, data, total: countResult[0]?.value ?? 0, limit: pageSize, offset: pageOffset };
   }
 
   @Get(':id/summary')
