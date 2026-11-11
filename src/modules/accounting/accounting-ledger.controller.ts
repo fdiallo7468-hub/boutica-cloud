@@ -10,7 +10,7 @@ export class AccountingLedgerController {
   @Post('entries')
   createEntry(
     @CurrentTenant() tenant: Tenant,
-    @Body() body: { periodId: string; entryDate: string },
+    @Body() body: {
       journalId: string; periodId: string; entryDate: string; description: string;
       sourceType?: string; sourceId?: string; idempotencyKey?: string;
       lines: Array<{ accountId: string; description?: string; debit?: string | number; credit?: string | number }>;
@@ -31,7 +31,11 @@ export class AccountingLedgerController {
   }
 
   @Post('entries/:entryId/reverse')
-  reverse(@CurrentTenant() tenant: Tenant, @Param('entryId') entryId: string) {
+  reverse(
+    @CurrentTenant() tenant: Tenant,
+    @Param('entryId') entryId: string,
+    @Body() body: { periodId: string; entryDate: string },
+  ) {
     return this.ledger.reverse(tenant, entryId, body.periodId, body.entryDate, tenant.userId);
   }
 
