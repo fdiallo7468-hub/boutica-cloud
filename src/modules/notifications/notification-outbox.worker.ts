@@ -1,6 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
-import { sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
 import { TenantTransactionService } from '../../infrastructure/database/tenant-transaction.service';
 import { notificationOutbox } from '../../infrastructure/database/schema';
