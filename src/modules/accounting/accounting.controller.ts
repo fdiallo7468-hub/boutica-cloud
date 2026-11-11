@@ -6,13 +6,16 @@ import {
   Get,
   Post,
   Put,
+  Patch,
+  Param,
 } from '@nestjs/common';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
 import {
   accountingAccounts,
   accountingFiscalYears,
   accountingJournals,
+  accountingPeriods,
   accountingProfiles,
 } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
@@ -151,6 +154,44 @@ export class AccountingController {
     }
   }
 
+  @Patch('accounts/:accountId')
+  async updateAccount(
+    @CurrentTenant() tenant: Tenant,
+    @Param('accountId') accountId: string,
+    @Body() body: { label?: unknown; normalBalance?: unknown; isPostable?: unknown; isActive?: unknown },
+  ) {
+    const [account] = await this.database.db.select().from(accountingAccounts).where(and(
+      eq(accountingAccounts.id, accountId), eq(accountingAccounts.businessId, tenant.businessId),
+    )).limit(1);
+    if (!account) throw new BadRequestException('Account not found in this business');
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    if (body.label !== undefined) updates.label = requiredText(body.label, 'label', 180);
+    if (body.normalBalance !== undefined) {
+      if (body.normalBalance !== 'DEBIT' && body.normalBalance !== 'CREDIT') {
+        throw new BadRequestException('normalBalance must be DEBIT or CREDIT');
+      }
+      updates.normalBalance = body.normalBalance;
+    }
+    if (body.isPostable !== undefined) {
+      if (typeof body.isPostable !== 'boolean') throw new BadRequestException('isPostable must be boolean');
+      if (body.isPostable) {
+        const [child] = await this.database.db.select({ id: accountingAccounts.id }).from(accountingAccounts)
+          .where(and(eq(accountingAccounts.businessId, tenant.businessId),
+            eq(accountingAccounts.parentAccountId, account.id))).limit(1);
+        if (child) throw new ConflictException('An account with child accounts cannot become postable');
+      }
+      updates.isPostable = body.isPostable;
+    }
+    if (body.isActive !== undefined) {
+      if (typeof body.isActive !== 'boolean') throw new BadRequestException('isActive must be boolean');
+      updates.isActive = body.isActive;
+    }
+    const [updated] = await this.database.db.update(accountingAccounts).set(updates)
+      .where(and(eq(accountingAccounts.id, accountId), eq(accountingAccounts.businessId, tenant.businessId)))
+      .returning();
+    return updated;
+  }
+
   @Get('fiscal-years')
   async listFiscalYears(@CurrentTenant() tenant: Tenant) {
     return this.database.db.select().from(accountingFiscalYears)
@@ -188,6 +229,82 @@ export class AccountingController {
       }
       throw error;
     }
+  }
+
+  @Get('periods')
+  async listPeriods(@CurrentTenant() tenant: Tenant) {
+    return this.database.db.select().from(accountingPeriods)
+      .where(eq(accountingPeriods.businessId, tenant.businessId))
+      .orderBy(asc(accountingPeriods.startDate), asc(accountingPeriods.code));
+  }
+
+  @Post('periods')
+  async createPeriod(
+    @CurrentTenant() tenant: Tenant,
+    @Body() body: { fiscalYearId?: unknown; code?: unknown; label?: unknown; startDate?: unknown; endDate?: unknown },
+  ) {
+    await this.requireProfile(tenant.businessId);
+    const fiscalYearId = requiredText(body.fiscalYearId, 'fiscalYearId', 36);
+    const code = requiredText(body.code, 'code', 30);
+    const label = requiredText(body.label, 'label', 120);
+    const startDate = validDate(body.startDate, 'startDate');
+    const endDate = validDate(body.endDate, 'endDate');
+    if (endDate < startDate) throw new BadRequestException('endDate must not precede startDate');
+
+    try {
+      return await this.database.db.transaction(async (tx) => {
+        // Serialize period creation per tenant to prevent concurrent overlapping periods.
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${tenant.businessId}), hashtext('accounting-periods'))`);
+        const [year] = await tx.select().from(accountingFiscalYears).where(and(
+          eq(accountingFiscalYears.id, fiscalYearId),
+          eq(accountingFiscalYears.businessId, tenant.businessId),
+        )).limit(1);
+        if (!year) throw new BadRequestException('Fiscal year does not exist in this business');
+        if (year.status !== 'OPEN') throw new ConflictException('Periods can only be added to an open fiscal year');
+        if (startDate < year.startDate || endDate > year.endDate) {
+          throw new BadRequestException('Period dates must be contained within the fiscal year');
+        }
+        const overlap = await tx.select({ id: accountingPeriods.id }).from(accountingPeriods).where(and(
+          eq(accountingPeriods.businessId, tenant.businessId),
+          sql`${accountingPeriods.startDate} <= ${endDate}::date`,
+          sql`${accountingPeriods.endDate} >= ${startDate}::date`,
+        )).limit(1);
+        if (overlap.length) throw new ConflictException('Accounting period overlaps an existing period');
+        const [period] = await tx.insert(accountingPeriods).values({
+          businessId: tenant.businessId, fiscalYearId, code, label, startDate, endDate,
+        }).returning();
+        return period;
+      });
+    } catch (error) {
+      if ((error as { code?: string })?.code === '23505') {
+        throw new ConflictException('Accounting period code already exists');
+      }
+      throw error;
+    }
+  }
+
+  @Patch('periods/:periodId/status')
+  async updatePeriodStatus(
+    @CurrentTenant() tenant: Tenant,
+    @Param('periodId') periodId: string,
+    @Body() body: { status?: unknown },
+  ) {
+    if (body.status !== 'CLOSED' && body.status !== 'LOCKED') {
+      throw new BadRequestException('status must be CLOSED or LOCKED');
+    }
+    const [period] = await this.database.db.select().from(accountingPeriods).where(and(
+      eq(accountingPeriods.id, periodId), eq(accountingPeriods.businessId, tenant.businessId),
+    )).limit(1);
+    if (!period) throw new BadRequestException('Accounting period not found in this business');
+    if (period.status === 'LOCKED') throw new ConflictException('A locked accounting period cannot change status');
+    if (period.status === 'CLOSED' && body.status !== 'LOCKED') {
+      throw new ConflictException('A closed accounting period can only be locked');
+    }
+    const [updated] = await this.database.db.update(accountingPeriods).set({
+      status: body.status, closedAt: period.closedAt ?? new Date(), updatedAt: new Date(),
+    }).where(and(eq(accountingPeriods.id, periodId), eq(accountingPeriods.businessId, tenant.businessId)))
+      .returning();
+    return updated;
   }
 
   @Get('journals')
@@ -233,6 +350,29 @@ export class AccountingController {
       }
       throw error;
     }
+  }
+
+  @Patch('journals/:journalId')
+  async updateJournal(
+    @CurrentTenant() tenant: Tenant,
+    @Param('journalId') journalId: string,
+    @Body() body: { label?: unknown; sequencePrefix?: unknown; isActive?: unknown },
+  ) {
+    const [journal] = await this.database.db.select().from(accountingJournals).where(and(
+      eq(accountingJournals.id, journalId), eq(accountingJournals.businessId, tenant.businessId),
+    )).limit(1);
+    if (!journal) throw new BadRequestException('Journal not found in this business');
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    if (body.label !== undefined) updates.label = requiredText(body.label, 'label', 120);
+    if (body.sequencePrefix !== undefined) updates.sequencePrefix = requiredText(body.sequencePrefix, 'sequencePrefix', 20);
+    if (body.isActive !== undefined) {
+      if (typeof body.isActive !== 'boolean') throw new BadRequestException('isActive must be boolean');
+      updates.isActive = body.isActive;
+    }
+    const [updated] = await this.database.db.update(accountingJournals).set(updates)
+      .where(and(eq(accountingJournals.id, journalId), eq(accountingJournals.businessId, tenant.businessId)))
+      .returning();
+    return updated;
   }
 
   private async requireProfile(businessId: string): Promise<void> {
