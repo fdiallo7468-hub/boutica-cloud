@@ -94,6 +94,10 @@ describe('Returns (e2e)', () => {
       .expect(201);
 
     expect(res.body.total).toBe('20.00');
+    await request(app.getHttpServer())
+      .post(`/api/v1/sales/${saleId}/cancel`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(409);
 
     const stockRes = await request(app.getHttpServer())
       .get(`/api/v1/inventory/${variantId}`)
