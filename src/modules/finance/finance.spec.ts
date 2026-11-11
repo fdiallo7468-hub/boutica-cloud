@@ -6,6 +6,7 @@ import { Tenant } from '../auth/tenant.type';
 describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)', () => {
   let mockDb: any;
   let mockOutboxService: any;
+  let mockAuditEventsService: any;
   let financeService: FinanceService;
 
   const mockTenant: Tenant = {
@@ -26,6 +27,9 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
     mockOutboxService = {
       enqueue: jest.fn().mockResolvedValue({ id: 'outbox-1', deduplicationKey: 'key-1' }),
     };
+    mockAuditEventsService = {
+      appendInTransaction: jest.fn().mockResolvedValue('audit-event-1'),
+    };
 
     mockDb = {
       db: {
@@ -36,7 +40,7 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
       },
     };
 
-    financeService = new FinanceService(mockDb, mockOutboxService);
+    financeService = new FinanceService(mockDb, mockOutboxService, mockAuditEventsService);
   });
 
   describe('Settlement Modes (Integral, Partial & Deferred)', () => {
