@@ -152,6 +152,8 @@ const rawEnvSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
 
   DATABASE_URL: z.string().optional(),
+  // Direct Neon connection used only by Drizzle migration tooling; never by API request pools.
+  DATABASE_URL_UNPOOLED: z.string().optional(),
   BETTER_AUTH_SECRET: z.string().optional(),
   BETTER_AUTH_URL: z.string().optional(),
   CORS_ORIGIN: z.string().optional(),
