@@ -1,7 +1,9 @@
 import {
   boolean,
   check,
+  date,
   index,
+  foreignKey,
   integer,
   jsonb,
   numeric,
@@ -717,3 +719,151 @@ export const offlineOperationsLog = pgTable(
   }),
 );
 
+
+
+/**
+ * ---------------------------------------------------------------------------
+ * PARTIE 8 — COMPTABILITÉ GÉNÉRALE SYSCOHADA (Phase 4)
+ * Les règles métier et la validation réglementaire résident dans le module
+ * accounting. Les montants des futures écritures utiliseront NUMERIC.
+ * ---------------------------------------------------------------------------
+ */
+export const accountingProfiles = pgTable(
+  'accounting_profiles',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'restrict' }),
+    countryCode: text('country_code').notNull().default('ML'),
+    framework: text('framework').notNull().default('SYSCOHADA_REVISED'),
+    accountingSystem: text('accounting_system').notNull().default('NORMAL'),
+    currency: text('currency').notNull().default('XOF'),
+    chartVersion: text('chart_version').notNull().default('SYSCOHADA_2017'),
+    configuredAt: timestamp('configured_at', { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessUnique: uniqueIndex('accounting_profiles_business_unique').on(t.businessId),
+    countryCheck: check('accounting_profiles_country_check', sql`${t.countryCode} ~ '^[A-Z]{2}$'`),
+    frameworkCheck: check('accounting_profiles_framework_check', sql`${t.framework} = 'SYSCOHADA_REVISED'`),
+    systemCheck: check('accounting_profiles_system_check', sql`${t.accountingSystem} IN ('NORMAL', 'SMT')`),
+    currencyCheck: check('accounting_profiles_currency_check', sql`${t.currency} ~ '^[A-Z]{3}$'`),
+  }),
+);
+
+export const accountingAccounts = pgTable(
+  'accounting_accounts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'restrict' }),
+    accountNumber: text('account_number').notNull(),
+    label: text('label').notNull(),
+    class: integer('class').notNull(),
+    parentAccountId: uuid('parent_account_id'),
+    normalBalance: text('normal_balance').notNull(),
+    isPostable: boolean('is_postable').notNull().default(true),
+    isActive: boolean('is_active').notNull().default(true),
+    sourceFramework: text('source_framework').notNull().default('SYSCOHADA_REVISED'),
+    sourceVersion: text('source_version').notNull().default('SYSCOHADA_2017'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessNumberUnique: uniqueIndex('accounting_accounts_business_number_unique').on(t.businessId, t.accountNumber),
+    businessIdIdUnique: uniqueIndex('accounting_accounts_business_id_id_unique').on(t.businessId, t.id),
+    businessClassIdx: index('accounting_accounts_business_class_idx').on(t.businessId, t.class, t.accountNumber),
+    businessParentIdx: index('accounting_accounts_business_parent_idx').on(t.businessId, t.parentAccountId),
+    classCheck: check('accounting_accounts_class_check', sql`${t.class} BETWEEN 1 AND 9`),
+    numberCheck: check('accounting_accounts_number_check', sql`${t.accountNumber} ~ '^[0-9]{1,20}$'`),
+    labelCheck: check('accounting_accounts_label_check', sql`length(btrim(${t.label})) BETWEEN 2 AND 180`),
+    balanceCheck: check('accounting_accounts_balance_check', sql`${t.normalBalance} IN ('DEBIT', 'CREDIT')`),
+    frameworkCheck: check('accounting_accounts_framework_check', sql`${t.sourceFramework} = 'SYSCOHADA_REVISED'`),
+    parentFk: foreignKey({
+      name: 'accounting_accounts_parent_fk',
+      columns: [t.businessId, t.parentAccountId],
+      foreignColumns: [t.businessId, t.id],
+    }),
+    noSelfParent: check('accounting_accounts_no_self_parent', sql`${t.parentAccountId} IS NULL OR ${t.parentAccountId} <> ${t.id}`),
+  }),
+);
+
+export const accountingFiscalYears = pgTable(
+  'accounting_fiscal_years',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'restrict' }),
+    code: text('code').notNull(),
+    label: text('label').notNull(),
+    startDate: date('start_date').notNull(),
+    endDate: date('end_date').notNull(),
+    status: text('status').notNull().default('OPEN'),
+    openedAt: timestamp('opened_at', { withTimezone: true }).defaultNow().notNull(),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessCodeUnique: uniqueIndex('accounting_fiscal_years_business_code_unique').on(t.businessId, t.code),
+    businessIdIdUnique: uniqueIndex('accounting_fiscal_years_business_id_id_unique').on(t.businessId, t.id),
+    businessDatesIdx: index('accounting_fiscal_years_business_dates_idx').on(t.businessId, t.startDate, t.endDate),
+    datesCheck: check('accounting_fiscal_years_dates_check', sql`${t.endDate} >= ${t.startDate}`),
+    statusCheck: check('accounting_fiscal_years_status_check', sql`${t.status} IN ('OPEN', 'CLOSING', 'CLOSED')`),
+  }),
+);
+
+export const accountingPeriods = pgTable(
+  'accounting_periods',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull(),
+    fiscalYearId: uuid('fiscal_year_id').notNull(),
+    code: text('code').notNull(),
+    label: text('label').notNull(),
+    startDate: date('start_date').notNull(),
+    endDate: date('end_date').notNull(),
+    status: text('status').notNull().default('OPEN'),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessCodeUnique: uniqueIndex('accounting_periods_business_code_unique').on(t.businessId, t.code),
+    businessIdIdUnique: uniqueIndex('accounting_periods_business_id_id_unique').on(t.businessId, t.id),
+    businessYearDatesIdx: index('accounting_periods_business_year_dates_idx').on(t.businessId, t.fiscalYearId, t.startDate, t.endDate),
+    datesCheck: check('accounting_periods_dates_check', sql`${t.endDate} >= ${t.startDate}`),
+    statusCheck: check('accounting_periods_status_check', sql`${t.status} IN ('OPEN', 'CLOSED', 'LOCKED')`),
+    fiscalYearFk: foreignKey({
+      name: 'accounting_periods_fiscal_year_fk',
+      columns: [t.businessId, t.fiscalYearId],
+      foreignColumns: [accountingFiscalYears.businessId, accountingFiscalYears.id],
+    }),
+  }),
+);
+
+export const accountingJournals = pgTable(
+  'accounting_journals',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'restrict' }),
+    locationId: uuid('location_id'),
+    code: text('code').notNull(),
+    label: text('label').notNull(),
+    journalType: text('journal_type').notNull(),
+    sequencePrefix: text('sequence_prefix').notNull(),
+    nextSequence: numeric('next_sequence', { precision: 20, scale: 0 }).notNull().default('1'),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessCodeUnique: uniqueIndex('accounting_journals_business_code_unique').on(t.businessId, t.code),
+    businessTypeIdx: index('accounting_journals_business_type_idx').on(t.businessId, t.journalType, t.isActive),
+    sequenceCheck: check('accounting_journals_sequence_check', sql`${t.nextSequence} > 0`),
+    typeCheck: check('accounting_journals_type_check', sql`${t.journalType} IN ('PURCHASE', 'SALES', 'CASH', 'BANK', 'GENERAL', 'OPENING', 'CLOSING', 'PAYROLL')`),
+    locationFk: foreignKey({
+      name: 'accounting_journals_location_fk',
+      columns: [t.businessId, t.locationId],
+      foreignColumns: [businessLocations.businessId, businessLocations.id],
+    }),
+  }),
+);
