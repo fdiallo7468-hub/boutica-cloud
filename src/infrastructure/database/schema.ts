@@ -858,6 +858,7 @@ export const accountingJournals = pgTable(
   },
   (t) => ({
     businessCodeUnique: uniqueIndex('accounting_journals_business_code_unique').on(t.businessId, t.code),
+    businessIdIdUnique: uniqueIndex('accounting_journals_business_id_id_unique').on(t.businessId, t.id),
     businessTypeIdx: index('accounting_journals_business_type_idx').on(t.businessId, t.journalType, t.isActive),
     sequenceCheck: check('accounting_journals_sequence_check', sql`${t.nextSequence} > 0`),
     typeCheck: check('accounting_journals_type_check', sql`${t.journalType} IN ('PURCHASE', 'SALES', 'CASH', 'BANK', 'GENERAL', 'OPENING', 'CLOSING', 'PAYROLL')`),
