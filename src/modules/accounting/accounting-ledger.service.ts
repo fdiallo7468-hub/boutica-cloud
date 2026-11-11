@@ -181,7 +181,7 @@ export class AccountingLedgerService {
       const entryDate = dateOnly(reversalDate);
       const [period] = await tx.select().from(accountingPeriods).where(and(
         eq(accountingPeriods.id, periodId), eq(accountingPeriods.businessId, tenant.businessId),
-      )).limit(1);
+      )).for('update').limit(1);
       if (!period || period.status !== 'OPEN') throw new ConflictException('Reversal requires an open accounting period');
       if (entryDate < period.startDate || entryDate > period.endDate) throw new BadRequestException('Reversal date must fall within the selected open period');
       const [journal] = await tx.select().from(accountingJournals).where(and(
