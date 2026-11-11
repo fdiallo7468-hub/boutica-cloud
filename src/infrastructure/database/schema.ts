@@ -1,4 +1,5 @@
 import {
+  bigint,
   boolean,
   check,
   date,
@@ -850,7 +851,7 @@ export const accountingJournals = pgTable(
     label: text('label').notNull(),
     journalType: text('journal_type').notNull(),
     sequencePrefix: text('sequence_prefix').notNull(),
-    nextSequence: numeric('next_sequence', { precision: 20, scale: 0 }).notNull().default('1'),
+    nextSequence: bigint('next_sequence', { mode: 'number' }).notNull().default(1),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
