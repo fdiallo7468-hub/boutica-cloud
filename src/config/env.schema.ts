@@ -177,7 +177,7 @@ const rawEnvSchema = z.object({
   NOVU_WORKFLOW_INVENTORY_OUT_OF_STOCK: z.string().optional(),
   // Resend & Transactional Email
   RESEND_API_KEY: z.string().optional(),
-  EMAIL_FROM: z.string().default('Boutica Cloud <notifications@boutica.cloud>'),
+  EMAIL_FROM: z.string().default('Boutica Cloud <notifications@example.com>'),
   RESET_PASSWORD_URL: z.string().url().optional(),
 
   // Puppeteer & PDF Generation
