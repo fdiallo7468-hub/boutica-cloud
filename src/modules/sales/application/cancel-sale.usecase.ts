@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { and, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../../infrastructure/database/database';
 import { inventoryBalances, payments, receivables, returns, saleItems, sales, stock, stockMovements } from '../../../infrastructure/database/schema';
 import { Tenant } from '../../auth/tenant.type';
@@ -27,7 +27,7 @@ export class CancelSaleUseCase {
         eq(receivables.businessId, tenant.businessId), eq(receivables.saleId, saleId),
       ));
       const receivableIds = saleReceivables.map((row: { id: string }) => row.id);
-      const paymentScope = [eq(payments.businessId, tenant.businessId), eq(payments.status, 'CONFIRMED')];
+      const paymentScope = [eq(payments.businessId, tenant.businessId), ne(payments.status, 'CANCELLED')];
       const paymentReference = receivableIds.length
         ? or(eq(payments.saleId, saleId), inArray(payments.receivableId, receivableIds))
         : eq(payments.saleId, saleId);
