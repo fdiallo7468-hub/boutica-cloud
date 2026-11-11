@@ -127,7 +127,7 @@ export class AccountingLedgerService {
           eq(accountingEntries.sourceId, input.sourceId),
         )).limit(1);
         if (existing) {
-          if (existing.requestHash && existing.requestHash !== requestHash) {
+          if (existing.requestHash !== requestHash) {
             throw new ConflictException('Source reference was reused with a different accounting payload');
           }
           return this.loadEntry(tx, tenant.businessId, existing.id);
@@ -235,6 +235,7 @@ export class AccountingLedgerService {
       if (!original) throw new NotFoundException('Accounting entry not found');
       if (original.status !== 'POSTED') throw new ConflictException('Only a posted accounting entry can be reversed');
       const entryDate = dateOnly(reversalDate);
+      if (entryDate < original.entryDate) throw new BadRequestException('A reversal date cannot precede the original entry date');
       // Keep the lock order consistent with createAndPost: journal, then period.
       const [journal] = await tx.select().from(accountingJournals).where(and(
         eq(accountingJournals.id, original.journalId), eq(accountingJournals.businessId, tenant.businessId),
@@ -390,7 +391,7 @@ export class AccountingLedgerService {
     }).from(accountingEntryLines).innerJoin(accountingEntries, and(
       eq(accountingEntries.id, accountingEntryLines.entryId),
       eq(accountingEntries.businessId, accountingEntryLines.businessId),
-    )).where(and(...conditions)).orderBy(asc(accountingEntries.entryDate), asc(accountingEntries.entryNumber));
+    )).where(and(...conditions)).orderBy(asc(accountingEntries.entryDate), asc(accountingEntries.entryNumber), asc(accountingEntryLines.lineNumber));
     let debit = 0n, credit = 0n;
     return rows.map((row) => {
       debit += accountingAmountToMinorUnits(row.debit);
