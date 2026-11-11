@@ -1,7 +1,9 @@
 # Boutica Cloud
 
-NestJS + TypeScript + PostgreSQL (Drizzle ORM, via Neon) backend for
-Boutica, a commerce/inventory management platform for retail merchants.
+NestJS + TypeScript + PostgreSQL (Drizzle ORM) backend for Boutica, a
+commerce and inventory management platform for retail merchants. The backend
+can be hosted on standard PostgreSQL and Node.js infrastructure; Neon and
+Render are optional providers.
 
 This is **v2.1**: a hardening pass (v1.1), a second hardening pass that
 cross-checked library APIs against current docs and fixed two
@@ -33,7 +35,7 @@ Application (Use-cases — Sales, Purchasing, Returns)
 Domain (Money, Quantity, SKU, Sale, Purchase, Return, Stock, Product — no
          NestJS / Drizzle / HTTP imports allowed here)
         ↓
-Infrastructure (Drizzle schema, Neon Postgres, DatabaseService)
+Infrastructure (Drizzle schema, PostgreSQL, DatabaseService)
 ```
 
 This is deliberately **not** uniform DDD everywhere. Catalog, Customers,
@@ -54,52 +56,47 @@ so the v2.0 auth migration touched almost none of the domain code.
 
 ## Prerequisites
 
-- Node.js 20+
-- **No Docker, anywhere.** A free [Neon](https://neon.tech) Postgres
-  project is the only external dependency.
+- Node.js 22 LTS
+- PostgreSQL 16+
+- Chrome/Chromium for Puppeteer PDF generation
+- Provider accounts and credentials required by enabled production integrations
+
+**Hosting is provider-neutral:** Neon is one PostgreSQL option and Render is one Node.js hosting option. Neither is required. See the complete [self-hosting and transfer guide](./docs/deployment/SELF_HOSTING.md) for database roles, environment variables, installation, migrations, backup/restore, and transfer acceptance.
 
 ## Setup
 
 ```bash
-npm install
+npm ci
 cp .env.example .env
 ```
 
-Edit `.env`:
+Configure `.env` with the PostgreSQL connection, a unique `BETTER_AUTH_SECRET`,
+the actual `BETTER_AUTH_URL`, and the authorized `CORS_ORIGIN` values. In
+production, configure the operator's own Arcjet and Cloudinary credentials;
+these are currently mandatory integrations. Do not use credentials belonging
+to the seller.
 
-1. **`DATABASE_URL`** — create a free project at
-   [console.neon.tech](https://console.neon.tech), then **Connect** →
-   toggle **Connection pooling OFF** → copy the connection string (it
-   should *not* have `-pooler` in the hostname — see the comment in
-   `.env.example` for why this app wants the direct string, not the pooled
-   one).
-2. **`BETTER_AUTH_SECRET`** — generate one:
-   ```bash
-   node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
-   ```
-3. **`BETTER_AUTH_URL`** — the URL you'll actually hit this API at (e.g.
-   `http://localhost:3000` for local dev).
-
-Then apply the versioned migrations and start the API:
+Create the database and the `boutica_runtime` / application login roles as
+described in [SELF_HOSTING.md](./docs/deployment/SELF_HOSTING.md), then apply
+the complete versioned migration history:
 
 ```bash
 npm run db:migrate
 npm run start:dev
 ```
 
-Use `db:migrate` for a fresh database and for every environment that must
-receive database triggers or other SQL objects not represented in the Drizzle
-table schema. In particular, migration `0010_atomic_user_business_provisioning`
-installs PostgreSQL triggers that provision a new business, its default
-activities/modules, the OWNER membership, and `users.business_id` in the same
-transaction as the user-row insert. Do not replace this migration with
+Use `db:migrate` for fresh databases and every environment that must receive
+PostgreSQL triggers, functions, constraints, and other SQL objects not
+represented by the Drizzle table schema. In particular, migration
+`0010_atomic_user_business_provisioning` installs triggers that provision a
+new business, its default activities/modules, the OWNER membership, and
+`users.business_id` atomically. Do not replace this migration with
 `db:push`.
 
-The API is served unprefixed with an explicit version in each controller
-path, e.g. `http://localhost:3000/api/v1/products`. Swagger docs are at
-`http://localhost:3000/docs`. Health check (unauthenticated, unversioned)
-is at `http://localhost:3000/health`. Auth lives at `/api/auth/*` — Better
-Auth's own convention, deliberately not moved under `/api/v1/`.
+The API is served with explicit versioned controller paths, e.g.
+`http://localhost:3000/api/v1/products`. Swagger docs are at
+`http://localhost:3000/docs`. Health check is at `http://localhost:3000/health`.
+Better Auth routes live at `/api/auth/*`.
 
 ## Authentication
 
@@ -287,10 +284,10 @@ an ephemeral PostgreSQL 16 service; it does not connect to Neon or production.
 | `npm run lint` | ESLint |
 | `npm test` | Unit tests |
 | `npm run test:cov` | Unit tests with coverage |
-| `npm run test:e2e` | Integration tests (needs a Neon database) |
+| `npm run test:e2e` | PostgreSQL integration tests (use a disposable database) |
 | `npm run db:generate` | Generate SQL migrations from the schema |
 | `npm run db:migrate` | Apply migrations |
-| `npm run db:push` | Push schema directly to Neon (dev/test convenience, skips migration files) |
+| `npm run db:push` | Push schema directly (development convenience only; skips SQL migration objects) |
 
 ## Domains
 
@@ -299,7 +296,7 @@ Suppliers · Sales · Returns · Customers · Expenses · Reports ·
 Store/Business — see AUDIT_REPORT.md section D for how each is modeled, and
 `BOUTICA_V2_FINALIZATION_REPORT.md` for the full v2.1 endpoint catalog.
 
-## Déploiement Render
+## Optional Render deployment example
 
 1. Créer un **Web Service** sur [render.com](https://render.com).
 2. Connecter ce dépôt GitHub (`boutica-cloud`).
@@ -309,9 +306,9 @@ Store/Business — see AUDIT_REPORT.md section D for how each is modeled, and
    - **Start Command** : `npm run start:prod`
    - **Health Check Path** : `/health`
 4. Variables d'environnement requises (dans l'onglet *Environment*) :
-   - `DATABASE_URL` : URL de connexion Neon PostgreSQL
+   - `DATABASE_URL` : URL de connexion PostgreSQL de l'opérateur
    - `BETTER_AUTH_SECRET` : clé aléatoire (32+ caractères)
-   - `BETTER_AUTH_URL` : URL publique Render
+   - `BETTER_AUTH_URL` : URL publique de l'installation
    - `NODE_ENV=production`
    - `CORS_ORIGIN` : origines HTTPS autorisées du client
    - `ARCJET_KEY` : clé Arcjet active (obligatoire en production)
@@ -319,7 +316,7 @@ Store/Business — see AUDIT_REPORT.md section D for how each is modeled, and
      `CLOUDINARY_API_SECRET` : stockage média durable via Cloudinary.
      Le secret API reste exclusivement côté backend.
 
-5. Appliquer la migration `0010_atomic_user_business_provisioning` à la base
-   Neon avant de déployer la version applicative qui s'appuie sur ses triggers.
-   Tester d'abord sur une branche Neon de préproduction. Ne pas utiliser
-   `db:push` pour remplacer cette migration.
+5. Appliquer toutes les migrations versionnées à la base PostgreSQL cible avant
+   de déployer la version applicative qui s'appuie sur ses triggers. Tester
+   d'abord sur une base de préproduction. Ne pas utiliser `db:push` pour
+   remplacer les migrations SQL.
