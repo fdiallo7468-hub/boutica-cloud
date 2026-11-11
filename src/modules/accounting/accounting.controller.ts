@@ -164,7 +164,7 @@ export class AccountingController {
       eq(accountingAccounts.id, accountId), eq(accountingAccounts.businessId, tenant.businessId),
     )).limit(1);
     if (!account) throw new BadRequestException('Account not found in this business');
-    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    const updates: { label?: string; normalBalance?: 'DEBIT' | 'CREDIT'; isPostable?: boolean; isActive?: boolean; updatedAt: Date } = { updatedAt: new Date() };
     if (body.label !== undefined) updates.label = requiredText(body.label, 'label', 180);
     if (body.normalBalance !== undefined) {
       if (body.normalBalance !== 'DEBIT' && body.normalBalance !== 'CREDIT') {
@@ -362,7 +362,7 @@ export class AccountingController {
       eq(accountingJournals.id, journalId), eq(accountingJournals.businessId, tenant.businessId),
     )).limit(1);
     if (!journal) throw new BadRequestException('Journal not found in this business');
-    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    const updates: { label?: string; sequencePrefix?: string; isActive?: boolean; updatedAt: Date } = { updatedAt: new Date() };
     if (body.label !== undefined) updates.label = requiredText(body.label, 'label', 120);
     if (body.sequencePrefix !== undefined) updates.sequencePrefix = requiredText(body.sequencePrefix, 'sequencePrefix', 20);
     if (body.isActive !== undefined) {
