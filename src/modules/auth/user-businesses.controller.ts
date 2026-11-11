@@ -22,7 +22,7 @@ import {
   Length,
   Matches,
 } from "class-validator";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Request } from "express";
 import { auth } from "../../auth/auth";
 import { DatabaseService } from "../../infrastructure/database/database";
@@ -100,44 +100,49 @@ export class UserBusinessesController {
   async listUserBusinesses(@Req() req: Request) {
     const user = await this.getAuthenticatedUser(req);
 
-    // Fetch user's current business_id from users table
-    const [currentUser] = await this.db.db
-      .select({ businessId: users.businessId })
-      .from(users)
-      .where(eq(users.id, user.id));
+    // This control-plane route has no active tenant yet. Set only the
+    // authenticated actor identity so RLS can expose that user's memberships.
+    return this.db.baseDb.transaction(async (tx) => {
+      await tx.execute(sql`
+        SELECT set_config('app.actor_user_id', ${user.id}, true)
+      `);
 
-    const activeBusinessId = currentUser?.businessId || null;
+      const [currentUser] = await tx
+        .select({ businessId: users.businessId })
+        .from(users)
+        .where(eq(users.id, user.id));
+      const activeBusinessId = currentUser?.businessId || null;
 
-    // Fetch all memberships joined with business information
-    const memberRows = await this.db.db
-      .select({
-        membershipId: businessMembers.id,
-        businessId: businessMembers.businessId,
-        role: businessMembers.role,
-        joinedAt: businessMembers.createdAt,
-        name: businesses.name,
-        currency: businesses.currency,
-        phone: businesses.phone,
-        sector: businesses.sector,
-        address: businesses.address,
-      })
-      .from(businessMembers)
-      .innerJoin(businesses, eq(businessMembers.businessId, businesses.id))
-      .where(eq(businessMembers.userId, user.id));
+      const memberRows = await tx
+        .select({
+          membershipId: businessMembers.id,
+          businessId: businessMembers.businessId,
+          role: businessMembers.role,
+          joinedAt: businessMembers.createdAt,
+          name: businesses.name,
+          currency: businesses.currency,
+          phone: businesses.phone,
+          sector: businesses.sector,
+          address: businesses.address,
+        })
+        .from(businessMembers)
+        .innerJoin(businesses, eq(businessMembers.businessId, businesses.id))
+        .where(eq(businessMembers.userId, user.id));
 
-    return {
-      activeBusinessId,
-      businesses: memberRows.map((b) => ({
-        id: b.businessId,
-        name: b.name,
-        currency: b.currency,
-        phone: b.phone,
-        sector: b.sector,
-        address: b.address,
-        role: b.role,
-        isActive: b.businessId === activeBusinessId,
-      })),
-    };
+      return {
+        activeBusinessId,
+        businesses: memberRows.map((b) => ({
+          id: b.businessId,
+          name: b.name,
+          currency: b.currency,
+          phone: b.phone,
+          sector: b.sector,
+          address: b.address,
+          role: b.role,
+          isActive: b.businessId === activeBusinessId,
+        })),
+      };
+    });
   }
 
   /**
@@ -154,56 +159,57 @@ export class UserBusinessesController {
       throw new BadRequestException("Le paramètre 'businessId' est obligatoire");
     }
 
-    // Vérifier que l'utilisateur appartient bien à cette entreprise
-    const [membership] = await this.db.db
-      .select()
-      .from(businessMembers)
-      .where(
-        and(
+    return this.db.baseDb.transaction(async (tx) => {
+      await tx.execute(sql`
+        SELECT set_config('app.actor_user_id', ${user.id}, true)
+      `);
+
+      const [membership] = await tx
+        .select()
+        .from(businessMembers)
+        .where(and(
           eq(businessMembers.businessId, targetBusinessId),
           eq(businessMembers.userId, user.id),
-        ),
-      );
+        ));
 
-    if (!membership) {
-      throw new ForbiddenException(
-        "Vous n'êtes pas membre de cette entreprise ou cet accès a été révoqué.",
-      );
-    }
+      if (!membership) {
+        throw new ForbiddenException(
+          "Vous n'êtes pas membre de cette entreprise ou cet accès a été révoqué.",
+        );
+      }
 
-    // Récupérer les détails de l'entreprise cible
-    const [business] = await this.db.db
-      .select()
-      .from(businesses)
-      .where(eq(businesses.id, targetBusinessId));
+      const [business] = await tx
+        .select()
+        .from(businesses)
+        .where(eq(businesses.id, targetBusinessId));
 
-    if (!business) {
-      throw new NotFoundException("Entreprise introuvable");
-    }
+      if (!business) {
+        throw new NotFoundException("Entreprise introuvable");
+      }
 
-    // Mettre à jour l'entreprise active dans la table users
-    await this.db.db
-      .update(users)
-      .set({
-        businessId: targetBusinessId,
-        role: membership.role,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, user.id));
+      await tx
+        .update(users)
+        .set({
+          businessId: targetBusinessId,
+          role: membership.role,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, user.id));
 
-    return {
-      success: true,
-      message: `Bascule effectuée vers ${business.name}`,
-      activeBusiness: {
-        id: business.id,
-        name: business.name,
-        currency: business.currency,
-        phone: business.phone,
-        sector: business.sector,
-        address: business.address,
-        role: membership.role,
-      },
-    };
+      return {
+        success: true,
+        message: `Bascule effectuée vers ${business.name}`,
+        activeBusiness: {
+          id: business.id,
+          name: business.name,
+          currency: business.currency,
+          phone: business.phone,
+          sector: business.sector,
+          address: business.address,
+          role: membership.role,
+        },
+      };
+    });
   }
 
   /**
@@ -242,7 +248,11 @@ export class UserBusinessesController {
     const phone = body.phone?.trim() || null;
     const address = body.address?.trim() || null;
 
-    const result = await this.db.db.transaction(async (tx) => {
+    const result = await this.db.baseDb.transaction(async (tx) => {
+      await tx.execute(sql`
+        SELECT set_config('app.actor_user_id', ${user.id}, true)
+      `);
+
       const [business] = await tx
         .insert(businesses)
         .values({
@@ -257,6 +267,10 @@ export class UserBusinessesController {
       if (!business) {
         throw new Error("Impossible d'insérer l'entreprise");
       }
+
+      await tx.execute(sql`
+        SELECT set_config('app.business_id', ${business.id}, true)
+      `);
 
       // Membership as OWNER
       await tx.insert(businessMembers).values({
