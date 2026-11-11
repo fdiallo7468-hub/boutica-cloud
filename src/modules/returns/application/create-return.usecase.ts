@@ -18,6 +18,7 @@ import { hashRequestPayload } from '../../../common/idempotency/idempotency.util
 import { Tenant } from '../../auth/tenant.type';
 import { Return, SaleItemReturnableInfo } from '../domain/return';
 import { CreateReturnDto } from '../dto/create-return.dto';
+import { LoyaltyLedgerService } from '../../loyalty/loyalty-ledger.service';
 
 const ENDPOINT = 'returns.create';
 
@@ -28,7 +29,7 @@ export interface CreateReturnResult {
 
 @Injectable()
 export class CreateReturnUseCase {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(private readonly db: DatabaseService, private readonly loyaltyLedger: LoyaltyLedgerService) {}
 
   async execute(tenant: Tenant, dto: CreateReturnDto, idempotencyKey: string | undefined): Promise<CreateReturnResult> {
     const requestHash = hashRequestPayload(dto);
@@ -164,6 +165,13 @@ export class CreateReturnUseCase {
           note: item.condition === 'DAMAGED' ? 'Returned as damaged — excluded from sellable stock' : undefined,
         });
       }
+
+      await this.loyaltyLedger.reverseForReturn(tx, {
+        businessId: tenant.businessId,
+        returnId,
+        saleId: sale.id,
+        actorUserId: tenant.userId,
+      });
 
       const responseBody = { ...returnRow, items: itemRows };
 
