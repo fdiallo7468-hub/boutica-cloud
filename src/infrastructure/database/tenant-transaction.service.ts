@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
-import type { PoolClient } from "pg";
+import { sql } from "drizzle-orm";
 import { DatabaseService } from "./database";
+import { TenantDatabaseContext } from "./tenant-database-context";
 
 export interface TenantTransactionContext {
   businessId: string;
@@ -8,41 +9,27 @@ export interface TenantTransactionContext {
   requestId?: string | null;
 }
 
-/** Uses transaction-local PostgreSQL settings; values cannot leak through the pool. */
+/** Runs every query in the callback on one transaction with transaction-local tenant identity. */
 @Injectable()
 export class TenantTransactionService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly tenantDatabaseContext: TenantDatabaseContext,
+  ) {}
 
-  async run<T>(context: TenantTransactionContext, work: (client: PoolClient) => Promise<T>): Promise<T> {
-    if (!context.businessId?.trim()) throw new Error("A businessId is required for a tenant transaction");
-
-    const client = await this.database.pool.connect();
-    let transactionStarted = false;
-    let clientDiscarded = false;
-
-    try {
-      await client.query("BEGIN");
-      transactionStarted = true;
-      await client.query(
-        "SELECT set_config('app.business_id', $1, true), set_config('app.actor_user_id', $2, true), set_config('app.request_id', $3, true)",
-        [context.businessId, context.actorUserId ?? "", context.requestId ?? ""],
-      );
-      const result = await work(client);
-      await client.query("COMMIT");
-      transactionStarted = false;
-      return result;
-    } catch (error) {
-      if (transactionStarted) {
-        try {
-          await client.query("ROLLBACK");
-        } catch {
-          client.release(true);
-          clientDiscarded = true;
-        }
-      }
-      throw error;
-    } finally {
-      if (!clientDiscarded) client.release();
+  async run<T>(context: TenantTransactionContext, work: () => Promise<T>): Promise<T> {
+    if (!context.businessId?.trim()) {
+      throw new Error("A businessId is required for a tenant transaction");
     }
+
+    return this.database.baseDb.transaction(async (transaction) => {
+      await transaction.execute(sql`
+        SELECT
+          set_config('app.business_id', ${context.businessId}, true),
+          set_config('app.actor_user_id', ${context.actorUserId ?? ""}, true),
+          set_config('app.request_id', ${context.requestId ?? ""}, true)
+      `);
+      return this.tenantDatabaseContext.run(transaction, work);
+    });
   }
 }
