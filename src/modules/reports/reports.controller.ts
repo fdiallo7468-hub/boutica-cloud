@@ -1,6 +1,6 @@
-import { Controller, Get, Header, Query, Res } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Header, Query, Res } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { and, desc, eq, gte, lte, ne, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gte, lte, ne, sql } from 'drizzle-orm';
 import type { Response } from 'express';
 import { DatabaseService } from '../../infrastructure/database/database';
 import { expenses, products, receivables, saleItems, sales, stock, variants } from '../../infrastructure/database/schema';
@@ -23,7 +23,7 @@ export class ReportsController {
     const now = new Date();
     const from = query.from ? new Date(query.from) : new Date(now.getFullYear(), now.getMonth(), 1);
     const to = query.to ? new Date(query.to) : now;
-    const businessId = tenant.businessId;
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) {\n      throw new BadRequestException('Invalid reporting date range');\n    }\n    const businessId = tenant.businessId;\n    const duration = Math.max(to.getTime() - from.getTime(), 1);\n    const previousTo = new Date(from.getTime() - 1);\n    const previousFrom = new Date(previousTo.getTime() - duration);
 
     const completedSalesInRange = and(
       eq(sales.businessId, businessId),
