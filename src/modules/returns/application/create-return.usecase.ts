@@ -29,7 +29,7 @@ export interface CreateReturnResult {
 
 @Injectable()
 export class CreateReturnUseCase {
-  constructor(private readonly db: DatabaseService, private readonly loyaltyLedger: LoyaltyLedgerService) {}
+  constructor(private readonly db: DatabaseService, private readonly loyaltyLedger: LoyaltyLedgerService = new LoyaltyLedgerService()) {}
 
   async execute(tenant: Tenant, dto: CreateReturnDto, idempotencyKey: string | undefined): Promise<CreateReturnResult> {
     const requestHash = hashRequestPayload(dto);
