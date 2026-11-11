@@ -9,6 +9,8 @@ import {
   accountingEntryLines,
   accountingJournals,
   accountingPeriods,
+  customers,
+  suppliers,
 } from '../../infrastructure/database/schema';
 import { Tenant } from '../auth/tenant.type';
 
@@ -66,6 +68,7 @@ export class AccountingLedgerService {
     }
     if (input.sourceType && input.sourceType.length > 60) throw new BadRequestException('sourceType is too long');
     if (input.sourceId && input.sourceId.length > 120) throw new BadRequestException('sourceId is too long');
+    if (input.idempotencyKey && input.idempotencyKey.length > 120) throw new BadRequestException('idempotencyKey is too long');
 
     const normalized = input.lines.map((line, index) => {
       const debit = accountingAmountToMinorUnits(line.debit, `lines[${index}].debit`);
@@ -83,8 +86,30 @@ export class AccountingLedgerService {
       throw new BadRequestException('Accounting entry is not balanced: total debits must equal total credits and be positive');
     }
 
-    const requestHash = createHash('sha256').update(JSON.stringify({ ...input, entryDate, description })).digest('hex');
+    const requestHash = createHash('sha256').update(JSON.stringify({
+      journalId: input.journalId,
+      periodId: input.periodId,
+      entryDate,
+      description,
+      sourceType: input.sourceType ?? null,
+      sourceId: input.sourceId ?? null,
+      lines: normalized.map((line) => ({
+        accountId: line.accountId,
+        description: line.description,
+        debit: line.debit.toString(),
+        credit: line.credit.toString(),
+        auxiliaryType: line.auxiliaryType ?? null,
+        auxiliaryId: line.auxiliaryId ?? null,
+      })),
+    })).digest('hex');
     return this.database.db.transaction(async (tx) => {
+      // Serialize duplicate requests before checking the unique idempotency/source indexes.
+      if (input.idempotencyKey) {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${tenant.businessId}), hashtext(${'accounting-idempotency:' + input.idempotencyKey}))`);
+      }
+      if (input.sourceType && input.sourceId) {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${tenant.businessId}), hashtext(${'accounting-source:' + input.sourceType + ':' + input.sourceId}))`);
+      }
       if (input.idempotencyKey) {
         const [existing] = await tx.select().from(accountingEntries).where(and(
           eq(accountingEntries.businessId, tenant.businessId),
@@ -101,7 +126,12 @@ export class AccountingLedgerService {
           eq(accountingEntries.sourceType, input.sourceType),
           eq(accountingEntries.sourceId, input.sourceId),
         )).limit(1);
-        if (existing) return this.loadEntry(tx, tenant.businessId, existing.id);
+        if (existing) {
+          if (existing.requestHash && existing.requestHash !== requestHash) {
+            throw new ConflictException('Source reference was reused with a different accounting payload');
+          }
+          return this.loadEntry(tx, tenant.businessId, existing.id);
+        }
       }
 
       const [journal] = await tx.select().from(accountingJournals).where(and(
@@ -118,6 +148,25 @@ export class AccountingLedgerService {
       if (period.status !== 'OPEN') throw new ConflictException('Accounting period is not open');
       if (entryDate < period.startDate || entryDate > period.endDate) {
         throw new BadRequestException('entryDate must fall within the selected accounting period');
+      }
+
+      const customerIds = [...new Set(normalized.filter((line) => line.auxiliaryType === 'CUSTOMER').map((line) => line.auxiliaryId!))];
+      if (customerIds.length) {
+        const foundCustomers = await tx.select({ id: customers.id }).from(customers).where(and(
+          eq(customers.businessId, tenant.businessId), inArray(customers.id, customerIds),
+        ));
+        if (foundCustomers.length !== customerIds.length) {
+          throw new BadRequestException('One or more customer auxiliaries do not belong to this business');
+        }
+      }
+      const supplierIds = [...new Set(normalized.filter((line) => line.auxiliaryType === 'SUPPLIER').map((line) => line.auxiliaryId!))];
+      if (supplierIds.length) {
+        const foundSuppliers = await tx.select({ id: suppliers.id }).from(suppliers).where(and(
+          eq(suppliers.businessId, tenant.businessId), inArray(suppliers.id, supplierIds),
+        ));
+        if (foundSuppliers.length !== supplierIds.length) {
+          throw new BadRequestException('One or more supplier auxiliaries do not belong to this business');
+        }
       }
 
       const accountIds = [...new Set(normalized.map((line) => line.accountId))];
@@ -184,26 +233,28 @@ export class AccountingLedgerService {
         eq(accountingEntries.businessId, tenant.businessId),
       )).for('update').limit(1);
       if (!original) throw new NotFoundException('Accounting entry not found');
+      if (original.status !== 'POSTED') throw new ConflictException('Only a posted accounting entry can be reversed');
       const entryDate = dateOnly(reversalDate);
+      // Keep the lock order consistent with createAndPost: journal, then period.
+      const [journal] = await tx.select().from(accountingJournals).where(and(
+        eq(accountingJournals.id, original.journalId), eq(accountingJournals.businessId, tenant.businessId),
+      )).for('update').limit(1);
+      if (!journal || !journal.isActive) throw new ConflictException('Original journal is not active');
       const [period] = await tx.select().from(accountingPeriods).where(and(
         eq(accountingPeriods.id, periodId), eq(accountingPeriods.businessId, tenant.businessId),
       )).for('update').limit(1);
       if (!period || period.status !== 'OPEN') throw new ConflictException('Reversal requires an open accounting period');
       if (entryDate < period.startDate || entryDate > period.endDate) throw new BadRequestException('Reversal date must fall within the selected open period');
-      const [journal] = await tx.select().from(accountingJournals).where(and(
-        eq(accountingJournals.id, original.journalId), eq(accountingJournals.businessId, tenant.businessId),
-      )).for('update').limit(1);
-      if (!journal || !journal.isActive) throw new ConflictException('Original journal is not active');
+      const [existingReversal] = await tx.select({ id: accountingEntries.id }).from(accountingEntries).where(and(
+        eq(accountingEntries.businessId, tenant.businessId),
+        eq(accountingEntries.reversalOfEntryId, original.id),
+      )).limit(1);
+      if (existingReversal) throw new ConflictException('This accounting entry has already been reversed');
       const [sequence] = await tx.update(accountingJournals).set({
         nextSequence: sql`${accountingJournals.nextSequence} + 1`, updatedAt: new Date(),
       }).where(and(eq(accountingJournals.id, journal.id), eq(accountingJournals.businessId, tenant.businessId)))
         .returning({ allocated: sql<number>`${accountingJournals.nextSequence} - 1` });
       if (!sequence) throw new ConflictException('Could not allocate an accounting journal sequence');
-      const [existingReversal] = await tx.select().from(accountingEntries).where(and(
-        eq(accountingEntries.businessId, tenant.businessId),
-        eq(accountingEntries.reversalOfEntryId, original.id),
-      )).limit(1);
-      if (existingReversal) throw new ConflictException('This accounting entry has already been reversed');
       const lines = await tx.select().from(accountingEntryLines).where(and(
         eq(accountingEntryLines.businessId, tenant.businessId),
         eq(accountingEntryLines.entryId, original.id),
@@ -349,13 +400,17 @@ export class AccountingLedgerService {
   }
 
   async openingBalance(tenant: Tenant, input: CreateEntryInput, actorId?: string) {
+    const sourceId = input.sourceId ?? input.idempotencyKey;
+    if (!sourceId) {
+      throw new BadRequestException('Opening balances require an idempotencyKey or an explicit sourceId');
+    }
     const [journal] = await this.database.db.select().from(accountingJournals).where(and(
       eq(accountingJournals.id, input.journalId), eq(accountingJournals.businessId, tenant.businessId),
     )).limit(1);
     if (!journal || journal.journalType !== 'OPENING' || !journal.isActive) {
       throw new BadRequestException('An active OPENING journal belonging to this business is required');
     }
-    return this.createAndPost(tenant, { ...input, sourceType: 'OPENING', sourceId: input.sourceId ?? input.idempotencyKey ?? input.entryDate }, actorId);
+    return this.createAndPost(tenant, { ...input, sourceType: 'OPENING', sourceId }, actorId);
   }
 
   private async loadEntry(executor: any, businessId: string, entryId: string) {
