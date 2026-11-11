@@ -48,13 +48,14 @@ REVOKE ALL ON FUNCTION public.boutica_reject_audit_event_mutation() FROM PUBLIC;
 -- The API runtime may append audit rows but must not read, rewrite or truncate
 -- the audit history. Grant only the INSERT path plus SELECT on the generated
 -- id required by INSERT ... RETURNING id. The role is optional in CI.
-DO $
+--> statement-breakpoint
+DO $audit_privileges$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'boutica_runtime') THEN
     EXECUTE 'REVOKE ALL PRIVILEGES ON TABLE public.audit_events FROM boutica_runtime';
     EXECUTE 'GRANT INSERT ON TABLE public.audit_events TO boutica_runtime';
     EXECUTE 'GRANT SELECT (id) ON TABLE public.audit_events TO boutica_runtime';
   END IF;
-END
-$;
+END;
+$audit_privileges$;
 
