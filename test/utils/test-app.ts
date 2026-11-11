@@ -33,7 +33,7 @@ export async function createTestApp(): Promise<{ app: INestApplication; db: Data
 export async function resetDatabase(db: DatabaseService): Promise<void> {
   await db.db.execute(sql`
     TRUNCATE TABLE
-      idempotency_keys, return_items, returns, sale_items, sales,
+      loyalty_ledger, loyalty_configurations, idempotency_keys, return_items, returns, sale_items, sales,
       purchase_items, purchases, stock_movements, stock, variants,
       products, customers, suppliers, expenses,
       sessions, accounts, verifications, users, businesses
