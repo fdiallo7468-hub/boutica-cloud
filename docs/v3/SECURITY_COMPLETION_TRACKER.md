@@ -1,5 +1,40 @@
 # Boutica Cloud 3.0 — Security completion tracker
 
+## Release-hardening update — 2026-11-11
+
+### Audit coverage increment
+
+The feature branch now writes the following append-only audit events inside the same Drizzle transaction as the business mutation:
+- `sale.created` and `sale.cancelled`
+- `purchase.received`
+- `return.completed`
+- `stock.adjusted`
+- `expense.created`
+- `receivable.created`
+- `payment.recorded` and `payment.cancelled`
+
+`AuditEventsService.appendInTransaction` uses the transaction executor, so an audit insert failure rolls back the associated business write. Metadata is minimized and excludes free-form cancellation reasons and stock notes. Unit coverage has been added for the transactional writer. The current CI run must still pass before this increment is accepted.
+
+### Neon backup / restore rehearsal
+
+- A restore was exercised from the existing manual snapshot `before-test-data-cleanup-2026-10-23` into a separate branch named `restore-rehearsal-2026-11-11`.
+- The snapshot is dated 2026-10-23; this proves the restore workflow for that historical snapshot, not a current production recovery point.
+- Creating a new manual snapshot was rejected by Neon because the project's snapshot limit was exceeded. Existing snapshots were not deleted.
+- The automatic snapshot schedule is empty. A fresh backup and an agreed retention/frequency policy remain required before production migration.
+- The production default branch `br-lucky-union-b5cqpuuo` was restored as the default `production` branch after the rehearsal; its migration ledger remains at 11 and the original business data remains present.
+
+### Production database observations
+
+- The production branch currently records migrations through journal entry 11. Feature migrations 0012–0019 are not applied there.
+- The existing runtime role `boutica_runtime` has broad CRUD grants on the current public tables. A complete least-privilege/default-privilege review and audit read-access restriction remain open.
+- The `businesses` table has RLS enabled without a corresponding policy; the other inspected public tables have RLS disabled.
+- `TenantTransactionService` currently exists but is not adopted as a universal request/worker transaction boundary. Enabling RLS on the full tenant inventory now would break legitimate query paths or create incomplete protection.
+
+### Current release decision
+
+RLS remains **not enabled as a blanket policy**. The next required engineering increment is a request-scoped Drizzle transaction context (including all authenticated routes and background workers), then a complete table/child-table policy matrix and alternating-tenant pool-isolation E2E tests. Do not merge or deploy until those tests pass.
+
+
 **Status:** hardening in progress; not approved for production. CI success does not constitute security sign-off.
 
 ## Verified foundation
