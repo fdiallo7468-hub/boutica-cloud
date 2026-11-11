@@ -31,11 +31,17 @@ describe('Tenant isolation (e2e)', () => {
   it('revoked business membership immediately blocks an otherwise valid session', async () => {
     const member = await registerBusiness(app, 'Revoked Membership Shop');
 
+    const [membership] = await db.db
+      .select({ userId: businessMembers.userId })
+      .from(businessMembers)
+      .where(eq(businessMembers.businessId, member.businessId));
+
+    expect(membership).toBeDefined();
     await db.db
       .delete(businessMembers)
       .where(and(
         eq(businessMembers.businessId, member.businessId),
-        eq(businessMembers.userId, member.userId),
+        eq(businessMembers.userId, membership!.userId),
       ));
 
     await request(app.getHttpServer())
