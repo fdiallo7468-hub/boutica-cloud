@@ -29,12 +29,13 @@ export class ReportsService {
 
   // --- EXCEL EXPORTS ---
 
-  async exportSalesExcel(businessId: string, from: Date, to: Date): Promise<Buffer> {
+  async exportSalesExcel(businessId: string, from: Date, to: Date, locationId?: string): Promise<Buffer> {
     const rows = await this.db.db
       .select({
         saleId: sales.id,
         createdAt: sales.createdAt,
         total: sales.total,
+        saleTotal: sales.total,
         status: sales.status,
         productName: products.name,
         variantName: variants.name,
@@ -52,6 +53,7 @@ export class ReportsService {
           eq(sales.status, 'COMPLETED'),
           gte(sales.createdAt, from),
           lte(sales.createdAt, to),
+          ...(locationId ? [eq(sales.locationId, locationId)] : []),
         ),
       )
       .orderBy(desc(sales.createdAt));
@@ -82,10 +84,10 @@ export class ReportsService {
       fgColor: { argb: 'FF4F46E5' },
     };
 
-    let totalGlobal = 0;
+    const totalBySale = new Map<string, number>();
     for (const r of rows) {
       const lineTotal = Number(r.unitPrice) * r.quantity;
-      totalGlobal += lineTotal;
+      totalBySale.set(r.saleId, Number(r.saleTotal));
       sheet.addRow({
         saleId: r.saleId,
         date: r.createdAt ? new Date(r.createdAt).toLocaleString('fr-FR') : '',
@@ -98,8 +100,9 @@ export class ReportsService {
       });
     }
 
+    const totalGlobal = [...totalBySale.values()].reduce((sum, value) => sum + value, 0);
     const totalRow = sheet.addRow({
-      product: 'TOTAL',
+      product: 'TOTAL VENTES (après remises)',
       lineTotal: totalGlobal,
     });
     totalRow.font = { bold: true };
@@ -174,7 +177,7 @@ export class ReportsService {
 
   // --- PDF EXPORTS (Puppeteer) ---
 
-  async exportSalesPdf(businessId: string, from: Date, to: Date): Promise<Buffer> {
+  async exportSalesPdf(businessId: string, from: Date, to: Date, locationId?: string): Promise<Buffer> {
     const rows = await this.db.db
       .select({
         saleId: sales.id,
@@ -189,6 +192,7 @@ export class ReportsService {
           eq(sales.status, 'COMPLETED'),
           gte(sales.createdAt, from),
           lte(sales.createdAt, to),
+          ...(locationId ? [eq(sales.locationId, locationId)] : []),
         ),
       )
       .orderBy(desc(sales.createdAt));
