@@ -152,7 +152,7 @@ const rawEnvSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
 
   DATABASE_URL: z.string().optional(),
-  // Direct Neon connection used only by Drizzle migration tooling; never by API request pools.
+  // Direct PostgreSQL connection used only by Drizzle migration tooling; never by API request pools.
   DATABASE_URL_UNPOOLED: z.string().optional(),
   BETTER_AUTH_SECRET: z.string().optional(),
   BETTER_AUTH_URL: z.string().optional(),
@@ -195,7 +195,7 @@ export const envSchema = rawEnvSchema.transform((raw, ctx) => {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['DATABASE_URL'],
-        message: 'DATABASE_URL is required in production (e.g. a Neon or PostgreSQL connection string)',
+        message: 'DATABASE_URL is required in production (a PostgreSQL connection string)',
       });
     } else if (
       KNOWN_DEV_DB_URLS.includes(databaseUrl.trim()) ||
@@ -261,7 +261,7 @@ export const envSchema = rawEnvSchema.transform((raw, ctx) => {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['BETTER_AUTH_URL'],
-        message: 'BETTER_AUTH_URL is required in production (e.g. https://boutica-cloud.onrender.com)',
+        message: 'BETTER_AUTH_URL is required in production (the public base URL of this installation)',
       });
     } else {
       try {
