@@ -1,9 +1,10 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { createProductWithVariant, createTestApp, registerBusiness, resetDatabase, adjustStock } from '../utils/test-app';
 import { DatabaseService } from '../../src/infrastructure/database/database';
-import { products, saleItems } from '../../src/infrastructure/database/schema';
+import { businessMembers, businesses, products, saleItems, users } from '../../src/infrastructure/database/schema';
 
 describe('PostgreSQL tenant RLS (e2e)', () => {
   let app: INestApplication;
@@ -75,6 +76,63 @@ describe('PostgreSQL tenant RLS (e2e)', () => {
         .returning({ id: products.id });
     });
     expect(deleted).toHaveLength(0);
+  });
+
+  it('limits membership discovery to the actor and supports scoped business bootstrap', async () => {
+    const a = await registerBusiness(app, 'RLS Membership A');
+    const b = await registerBusiness(app, 'RLS Membership B');
+    const [owner] = await db.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.businessId, a.businessId))
+      .limit(1);
+    expect(owner).toBeDefined();
+
+    const visibleMemberships = await db.baseDb.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE boutica_runtime`);
+      await tx.execute(sql`SELECT set_config('app.actor_user_id', ${owner!.id}, true)`);
+      return tx.select({ businessId: businessMembers.businessId })
+        .from(businessMembers);
+    });
+    expect(visibleMemberships.map((row) => row.businessId)).toEqual([a.businessId]);
+    expect(visibleMemberships.some((row) => row.businessId === b.businessId)).toBe(false);
+
+    const newBusinessId = randomUUID();
+    const created = await db.baseDb.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE boutica_runtime`);
+      await tx.execute(sql`
+        SELECT
+          set_config('app.actor_user_id', ${owner!.id}, true),
+          set_config('app.business_id', ${newBusinessId}, true)
+      `);
+      const [business] = await tx.insert(businesses).values({
+        id: newBusinessId,
+        name: 'RLS-created additional business',
+        currency: 'XOF',
+        sector: 'QUINCAILLERIE',
+      }).returning();
+      await tx.insert(businessMembers).values({
+        businessId: newBusinessId,
+        userId: owner!.id,
+        role: 'OWNER',
+      });
+      return business;
+    });
+    expect(created.id).toBe(newBusinessId);
+
+    await expect(db.baseDb.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE boutica_runtime`);
+      await tx.execute(sql`
+        SELECT
+          set_config('app.actor_user_id', ${owner!.id}, true),
+          set_config('app.business_id', ${a.businessId}, true)
+      `);
+      await tx.insert(businessMembers).values({
+        businessId: b.businessId,
+        userId: owner!.id,
+        role: 'OWNER',
+      });
+    })).rejects.toThrow(/row-level security|policy/i);
   });
 
   it('rejects a child row that links a tenant A sale to a tenant B variant', async () => {
