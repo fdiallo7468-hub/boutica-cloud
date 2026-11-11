@@ -81,12 +81,18 @@ La Phase 4.3 est considérée comme validée dans le périmètre de travail conv
 ### 4.4 — grand livre et balance : premier incrément implémenté
 
 - Consultation des écritures avec filtres de période/date.
-- Grand livre par compte avec cumul débit, crédit et solde courant.
-- Balance générale agrégée par compte, avec totaux débit et crédit.
+- Grand livre par compte et balance générale agrégée, calculés exclusivement à partir des écritures POSTED.
+- Auxiliaires clients/fournisseurs : dimensions de tiers sur les lignes, références composites tenant-safe et consultation chronologique des mouvements.
+- Soldes d'ouverture : comptabilisation via un journal OPENING actif, dans une période ouverte, avec partie double et idempotence.
 
 Routes :
 - `GET /api/v1/accounting/accounts/:accountId/ledger`
+- `GET /api/v1/accounting/customers/:customerId/ledger`
+- `GET /api/v1/accounting/suppliers/:supplierId/ledger`
+- `POST /api/v1/accounting/opening-balances`
 - `GET /api/v1/accounting/trial-balance`
+
+Migration `0019_accounting_auxiliary_ledgers.sql` ajoute les références clients/fournisseurs sur les lignes comptables, protégées par clés étrangères composites et contrainte empêchant d'affecter deux tiers à une même ligne. Les écritures de brouillon sont exclues des grands livres et de la balance.
 
 La balance et le grand livre doivent recevoir des tests de réconciliation PostgreSQL dédiés. Le développement restant de 4.4 porte exclusivement sur les auxiliaires clients/fournisseurs, les soldes d'ouverture et les tests d'acceptation associés.
 
