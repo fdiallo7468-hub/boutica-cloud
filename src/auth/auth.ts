@@ -1,7 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { bearer } from "better-auth/plugins";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { envSchema } from "../config/env.schema";
@@ -27,6 +27,25 @@ const pool = new Pool({
   ...(useSsl ? { ssl: { rejectUnauthorized: env.NODE_ENV === "production" } } : {}),
 });
 const db = drizzle(pool, { schema: { users, sessions, accounts, verifications, businesses, businessActivities, businessModuleConfigurations, businessMembers } });
+
+/**
+ * Resolve the active tenant from the persisted membership relation.
+ * The session's businessId is only a selector; it is never proof of membership.
+ * Role is read from business_members so stale user/session role fields cannot
+ * grant privileges after a membership change.
+ */
+export async function resolveTenantMembership(userId: string, businessId: string) {
+  const [membership] = await db
+    .select({ role: businessMembers.role })
+    .from(businessMembers)
+    .where(and(
+      eq(businessMembers.userId, userId),
+      eq(businessMembers.businessId, businessId),
+    ))
+    .limit(1);
+
+  return membership ?? null;
+}
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => {
     const entities: Record<string, string> = {
