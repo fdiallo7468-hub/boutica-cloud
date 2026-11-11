@@ -10,6 +10,7 @@ import {
 } from "@nestjs/common";
 import { fromNodeHeaders } from "better-auth/node";
 import { eq, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import type { Request } from "express";
 import { auth } from "../../auth/auth";
 import { DatabaseService } from "../../infrastructure/database/database";
@@ -103,9 +104,15 @@ export class OnboardingController {
         throw new BadRequestException("Une entreprise est déjà rattachée à cet utilisateur");
       }
 
+      const businessId = randomUUID();
+      await tx.execute(sql`
+        SELECT set_config('app.business_id', ${businessId}, true)
+      `);
+
       const [business] = await tx
         .insert(businesses)
         .values({
+          id: businessId,
           name,
           currency,
           phone,
