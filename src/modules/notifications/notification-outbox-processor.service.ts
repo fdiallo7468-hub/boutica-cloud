@@ -67,7 +67,9 @@ export class NotificationOutboxProcessor implements OnModuleInit, OnModuleDestro
       void this.refreshLock(event.id, event.businessId);
     }, LOCK_REFRESH_INTERVAL_MS);
     try {
-      await this.delivery.deliver(event);
+      await this.tenantTransactions.run({ businessId: event.businessId }, async () => {
+        await this.delivery.deliver(event);
+      });
       await this.tenantTransactions.run({ businessId: event.businessId }, async () => {
         await this.database.db.execute(sql`
           SELECT public.boutica_update_notification_outbox(
