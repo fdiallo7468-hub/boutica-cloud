@@ -77,27 +77,39 @@ LANGUAGE plpgsql AS $$
 DECLARE target_business_id uuid;
 DECLARE target_entry_id uuid;
 BEGIN
-  IF TG_OP = 'DELETE' THEN
-    target_business_id := OLD.business_id;
-    target_entry_id := OLD.id;
-    IF TG_TABLE_NAME = 'accounting_entry_lines' THEN
-      target_entry_id := OLD.entry_id;
+  IF TG_TABLE_NAME = 'accounting_entries' THEN
+    IF TG_OP = 'INSERT' THEN
+      IF NEW.status <> 'DRAFT' THEN
+        RAISE EXCEPTION 'Accounting entries must be created as DRAFT before posting';
+      END IF;
+      RETURN NEW;
     END IF;
-  ELSE
-    target_business_id := NEW.business_id;
-    target_entry_id := NEW.id;
-    IF TG_TABLE_NAME = 'accounting_entry_lines' THEN
-      target_entry_id := NEW.entry_id;
+    IF OLD.status = 'POSTED' THEN
+      RAISE EXCEPTION 'Posted accounting entries are immutable; create a reversal entry';
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  -- For entry lines, protect both the old and new parent on UPDATE so a
+  -- line cannot be moved out of a posted entry into a draft entry.
+  IF TG_OP IN ('UPDATE', 'DELETE') THEN
+    SELECT status INTO STRICT target_entry_id
+    FROM public.accounting_entries
+    WHERE business_id = OLD.business_id AND id = OLD.entry_id;
+    IF target_entry_id::text = 'POSTED' THEN
+      RAISE EXCEPTION 'Lines of a posted accounting entry are immutable';
     END IF;
   END IF;
-  IF EXISTS (
-    SELECT 1 FROM public.accounting_entries e
-    WHERE e.business_id = target_business_id AND e.id = target_entry_id AND e.status = 'POSTED'
-  ) THEN
-    RAISE EXCEPTION 'Posted accounting entries are immutable; create a reversal entry';
+  IF TG_OP IN ('INSERT', 'UPDATE') THEN
+    SELECT status INTO STRICT target_entry_id
+    FROM public.accounting_entries
+    WHERE business_id = NEW.business_id AND id = NEW.entry_id;
+    IF target_entry_id::text = 'POSTED' THEN
+      RAISE EXCEPTION 'Lines of a posted accounting entry are immutable';
+    END IF;
+    RETURN NEW;
   END IF;
-  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
-  RETURN NEW;
+  RETURN OLD;
 END;
 $$;
 CREATE TRIGGER accounting_entries_append_only
