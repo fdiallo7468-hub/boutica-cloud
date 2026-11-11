@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { and, desc, eq, lte } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
+import { AuditEventsService } from '../../infrastructure/database/audit-events.service';
 import {
   businesses,
   businessLocations,
@@ -30,6 +31,7 @@ export class FinanceService {
   constructor(
     private readonly db: DatabaseService,
     private readonly outboxService: NotificationOutboxService,
+    private readonly auditEvents: AuditEventsService = new AuditEventsService(),
   ) {}
 
   /**
@@ -201,6 +203,15 @@ export class FinanceService {
         });
       }
 
+      await this.auditEvents.appendInTransaction(tx, {
+        businessId: tenant.businessId,
+        actorUserId: tenant.userId,
+        locationId: paymentLocationId,
+        action: 'payment.recorded',
+        resourceType: 'payment',
+        resourceId: payment.id,
+        metadata: { amount: payment.amount, paymentMethod: payment.paymentMethod, receiptNumber: payment.receiptNumber },
+      });
       return {
         ...payment,
         customerName: customer.name,
@@ -310,6 +321,15 @@ export class FinanceService {
         },
       });
 
+      await this.auditEvents.appendInTransaction(tx, {
+        businessId: tenant.businessId,
+        actorUserId: tenant.userId,
+        locationId: payment.locationId,
+        action: 'payment.cancelled',
+        resourceType: 'payment',
+        resourceId: paymentId,
+        metadata: { amount: payment.amount, receiptNumber: payment.receiptNumber, reason: dto.reason.trim() },
+      });
       return {
         success: true,
         message: 'Paiement annulé et créance réajustée avec succès',
@@ -427,6 +447,15 @@ export class FinanceService {
         },
       });
 
+      await this.auditEvents.appendInTransaction(tx, {
+        businessId: tenant.businessId,
+        actorUserId: tenant.userId,
+        locationId: sale.locationId,
+        action: 'receivable.created',
+        resourceType: 'receivable',
+        resourceId: receivable.id,
+        metadata: { initialAmount: receivable.initialAmount, amountPaidNow: receivable.paidAmount, saleId: sale.id },
+      });
       return receivable;
     });
   }
