@@ -1,13 +1,18 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { and, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../../infrastructure/database/database';
+import { AuditEventsService } from '../../../infrastructure/database/audit-events.service';
 import { inventoryBalances, payments, receivables, returns, saleItems, sales, stock, stockMovements } from '../../../infrastructure/database/schema';
 import { Tenant } from '../../auth/tenant.type';
 import { LoyaltyLedgerService } from '../../loyalty/loyalty-ledger.service';
 
 @Injectable()
 export class CancelSaleUseCase {
-  constructor(private readonly db: DatabaseService, private readonly loyaltyLedger: LoyaltyLedgerService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly loyaltyLedger: LoyaltyLedgerService,
+    private readonly auditEvents: AuditEventsService = new AuditEventsService(),
+  ) {}
 
   async execute(tenant: Tenant, saleId: string) {
     return this.db.db.transaction(async (tx) => {
@@ -69,6 +74,15 @@ export class CancelSaleUseCase {
 
       await this.loyaltyLedger.reverseForCancellation(tx, {
         businessId: tenant.businessId, saleId, actorUserId: tenant.userId,
+      });
+      await this.auditEvents.appendInTransaction(tx, {
+        businessId: tenant.businessId,
+        actorUserId: tenant.userId,
+        locationId: sale.locationId,
+        action: 'sale.cancelled',
+        resourceType: 'sale',
+        resourceId: saleId,
+        metadata: { restoredItemCount: items.length },
       });
       return { ...cancelled, alreadyCancelled: false };
     });
