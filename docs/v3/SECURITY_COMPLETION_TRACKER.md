@@ -85,3 +85,36 @@ These items will no longer block Phase 3 feature development, but remain release
 
 ### Operating rule
 Continue feature development on the existing `feat/boutica-cloud-v3-foundation` branch and PR #5. Do not create a new branch or PR. Keep tenant membership checks, business ownership predicates, financial consistency and negative cross-tenant tests in the definition of done for new Phase 3 work. No production migration, Render deployment or PR merge is authorized by this decision.
+
+
+## Release-hardening verification — 2026-11-11 (follow-up)
+
+### Request-scoped transaction boundary
+- `TenantDatabaseInterceptor` is registered as the global Nest interceptor in `src/app.module.ts`.
+- It resolves the authenticated session, re-checks the persisted `business_members` membership, and calls `TenantTransactionService.run` for the active business.
+- `TenantTransactionService` sets `app.business_id`, `app.actor_user_id`, and `app.request_id` with transaction-local `set_config(..., true)`, then exposes that exact Drizzle transaction through `AsyncLocalStorage`.
+- `DatabaseService.db` resolves to the request transaction when present; `baseDb` remains available outside a request. This proves the HTTP request boundary, not yet every worker/background execution path.
+
+### Live Neon privilege/RLS findings (production branch, read-only inspection)
+- Default Neon SQL connection is `neondb_owner`, which has `rolbypassrls = true`; RLS is therefore bypassed by that owner connection.
+- `boutica_runtime` has `rolsuper = false` and `rolbypassrls = false`, but currently has broad SELECT/INSERT/UPDATE/DELETE grants across application tables.
+- The live `businesses` table has RLS enabled but zero policies. A direct read as `boutica_runtime` returns zero businesses, while the owner sees 8. This is an active compatibility defect if Render uses `boutica_runtime` for the business-profile path; the exact Render DATABASE_URL role has not been exposed or inferred.
+- 23 live tables with a `business_id` column have RLS disabled. Child tables such as `sale_items`, `purchase_items`, and `return_items` lack a direct `business_id` column and need parent-join policies.
+- Do not enable a broad RLS migration until all worker paths, identity/auth queries, and runtime connection-role selection have been validated under the non-BYPASSRLS role.
+
+### Current-data recovery rehearsal
+- Created an isolated Neon branch `recovery-rehearsal-current-2026-11-11` (`br-proud-flower-b5tpo59z`) from production at parent LSN `0/3E25978`, timestamp `2026-11-11T15:41:40Z`.
+- The branch reached `ready`; production/default branch was not changed.
+- Owner-side counts on the new branch match production at creation: 8 businesses, 8 users, 6 products, 7 sales.
+- Runtime-role test confirms the current `businesses` RLS policy gap: it sees 0 businesses on the rehearsal branch, while owner sees 8.
+- This is a fresh branch-from-current recovery copy and a connectivity/data-count rehearsal, not a completed PITR restore from a new snapshot. Snapshot limit remains exceeded.
+
+### Backup plan constraint
+- Neon project owner subscription is `free_v3`; history retention is 21,600 seconds (6 hours).
+- Neon API rejects automatic backup schedule configuration because scheduled backups require a paid plan. Do not claim automatic backups are configured.
+- The user must choose/authorize a paid Neon plan or an external backup destination before a durable scheduled-backup policy can be enabled.
+
+### Release gate status
+- Latest CI on head `67801c221d02a36c09a4b10c3509152a31d7be6f`: run #234 completed successfully.
+- PR #5 remains open and Draft; no merge, production migration, Render environment change, or deployment has been performed.
+- RLS, worker coverage, least-privilege grants, recent snapshot/PITR proof, and runtime connection-role verification remain release blockers.
