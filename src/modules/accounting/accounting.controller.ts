@@ -212,18 +212,22 @@ export class AccountingController {
     const endDate = validDate(body.endDate, 'endDate');
     if (endDate < startDate) throw new BadRequestException('endDate must not precede startDate');
 
-    const existing = await this.database.db.select({
-      startDate: accountingFiscalYears.startDate,
-      endDate: accountingFiscalYears.endDate,
-    }).from(accountingFiscalYears).where(eq(accountingFiscalYears.businessId, tenant.businessId));
-    if (existing.some((year) => startDate <= year.endDate && endDate >= year.startDate)) {
-      throw new ConflictException('Fiscal year overlaps an existing fiscal year');
-    }
     try {
-      const [year] = await this.database.db.insert(accountingFiscalYears).values({
-        businessId: tenant.businessId, code, label, startDate, endDate,
-      }).returning();
-      return year;
+      return await this.database.db.transaction(async (tx) => {
+        // Serialize fiscal-year creation per tenant; an application-only overlap check races under concurrency.
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${tenant.businessId}), hashtext('accounting-fiscal-years'))`);
+        const existing = await tx.select({
+          startDate: accountingFiscalYears.startDate,
+          endDate: accountingFiscalYears.endDate,
+        }).from(accountingFiscalYears).where(eq(accountingFiscalYears.businessId, tenant.businessId));
+        if (existing.some((year) => startDate <= year.endDate && endDate >= year.startDate)) {
+          throw new ConflictException('Fiscal year overlaps an existing fiscal year');
+        }
+        const [year] = await tx.insert(accountingFiscalYears).values({
+          businessId: tenant.businessId, code, label, startDate, endDate,
+        }).returning();
+        return year;
+      });
     } catch (error) {
       if ((error as { code?: string })?.code === '23505') {
         throw new ConflictException('Fiscal year code already exists');
@@ -293,19 +297,22 @@ export class AccountingController {
     if (body.status !== 'CLOSED' && body.status !== 'LOCKED') {
       throw new BadRequestException('status must be CLOSED or LOCKED');
     }
-    const [period] = await this.database.db.select().from(accountingPeriods).where(and(
-      eq(accountingPeriods.id, periodId), eq(accountingPeriods.businessId, tenant.businessId),
-    )).limit(1);
-    if (!period) throw new BadRequestException('Accounting period not found in this business');
-    if (period.status === 'LOCKED') throw new ConflictException('A locked accounting period cannot change status');
-    if (period.status === 'CLOSED' && body.status !== 'LOCKED') {
-      throw new ConflictException('A closed accounting period can only be locked');
-    }
-    const [updated] = await this.database.db.update(accountingPeriods).set({
-      status: body.status, closedAt: period.closedAt ?? new Date(), updatedAt: new Date(),
-    }).where(and(eq(accountingPeriods.id, periodId), eq(accountingPeriods.businessId, tenant.businessId)))
-      .returning();
-    return updated;
+    return this.database.db.transaction(async (tx) => {
+      // Serialize transitions so a stale concurrent request cannot move LOCKED back to CLOSED.
+      const [period] = await tx.select().from(accountingPeriods).where(and(
+        eq(accountingPeriods.id, periodId), eq(accountingPeriods.businessId, tenant.businessId),
+      )).for('update').limit(1);
+      if (!period) throw new BadRequestException('Accounting period not found in this business');
+      if (period.status === 'LOCKED') throw new ConflictException('A locked accounting period cannot change status');
+      if (period.status === 'CLOSED' && body.status !== 'LOCKED') {
+        throw new ConflictException('A closed accounting period can only be locked');
+      }
+      const [updated] = await tx.update(accountingPeriods).set({
+        status: body.status, closedAt: period.closedAt ?? new Date(), updatedAt: new Date(),
+      }).where(and(eq(accountingPeriods.id, periodId), eq(accountingPeriods.businessId, tenant.businessId)))
+        .returning();
+      return updated;
+    });
   }
 
   @Get('journals')
