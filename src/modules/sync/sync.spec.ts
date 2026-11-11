@@ -6,6 +6,7 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
   let mockDb: any;
   let mockFinanceService: any;
   let mockOutboxService: any;
+  let mockLoyaltyLedger: any;
   let syncService: SyncService;
 
   const mockTenant: Tenant = {
@@ -23,6 +24,8 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
       enqueue: jest.fn().mockResolvedValue({ id: 'outbox-sync-1' }),
     };
 
+    mockLoyaltyLedger = { awardForSale: jest.fn().mockResolvedValue(20) };
+
     mockDb = {
       db: {
         select: jest.fn(),
@@ -33,7 +36,7 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
       },
     };
 
-    syncService = new SyncService(mockDb, mockFinanceService, mockOutboxService);
+    syncService = new SyncService(mockDb, mockFinanceService, mockOutboxService, mockLoyaltyLedger);
   });
 
   describe('Device Registration & Sync Status', () => {
@@ -186,6 +189,9 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
       expect(result.results.length).toBe(3);
       expect(result.results.every((r) => r.status === 'COMMITTED')).toBe(true);
       expect(mockFinanceService.recordPayment).toHaveBeenCalled();
+      expect(mockLoyaltyLedger.awardForSale).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        businessId: mockTenant.businessId, customerId: 'cust-offline-1', saleId: 'sale-offline-1',
+      }));
     });
 
     it('returns cached COMMITTED response without duplicate writes when operation is replayed', async () => {
