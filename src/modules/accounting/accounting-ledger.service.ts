@@ -120,13 +120,6 @@ export class AccountingLedgerService {
         throw new BadRequestException('entryDate must fall within the selected accounting period');
       }
 
-      for (const line of normalized) {
-        if (!line.auxiliaryId) continue;
-        const table = line.auxiliaryType === 'CUSTOMER' ? 'customers' : 'suppliers';
-        const result = await tx.execute(sql.raw('SELECT id FROM public.' + table + ' WHERE business_id = $1 AND id = $2'), [tenant.businessId, line.auxiliaryId]);
-        if (!result.rows?.length) throw new BadRequestException('Auxiliary third party does not belong to this business');
-      }
-
       const accountIds = [...new Set(normalized.map((line) => line.accountId))];
       const accounts = await tx.select().from(accountingAccounts).where(and(
         eq(accountingAccounts.businessId, tenant.businessId),
@@ -294,7 +287,7 @@ export class AccountingLedgerService {
 
   async trialBalance(tenant: Tenant, from?: string, to?: string) {
     const range = validateDateRange(from, to);
-    const conditions = [eq(accountingEntries.businessId, tenant.businessId)];
+    const conditions = [eq(accountingEntries.businessId, tenant.businessId), eq(accountingEntries.status, 'POSTED')];
     if (range.from) conditions.push(gte(accountingEntries.entryDate, range.from));
     if (range.to) conditions.push(lte(accountingEntries.entryDate, range.to));
     const rows = await this.database.db.select({
