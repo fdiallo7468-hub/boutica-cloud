@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
+import { TenantTransactionService } from '../../infrastructure/database/tenant-transaction.service';
 import { notificationOutbox } from '../../infrastructure/database/schema';
 import { NotificationDeliveryService } from './notification-delivery.service';
 import { NotificationOutboxEvent } from './notification-events';
@@ -21,6 +22,7 @@ export class NotificationOutboxProcessor implements OnModuleInit, OnModuleDestro
   constructor(
     private readonly database: DatabaseService,
     private readonly delivery: NotificationDeliveryService,
+    private readonly tenantTransactions: TenantTransactionService,
   ) {}
 
   onModuleInit(): void {
@@ -116,7 +118,7 @@ export class NotificationOutboxProcessor implements OnModuleInit, OnModuleDestro
   private async claimNext(): Promise<NotificationOutboxEvent | undefined> {
     const now = new Date();
     const staleLockTime = new Date(now.getTime() - LOCK_TIMEOUT_MS);
-    const claimResult = await this.database.db.execute(sql`
+    const claimResult = await this.database.baseDb.execute(sql`
       SELECT id, business_id
       FROM public.boutica_claim_notification_outbox(1, 'pending', 'processing', ${staleLockTime})
     `);
