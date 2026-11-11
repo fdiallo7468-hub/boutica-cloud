@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import { loyaltyConfigurations, loyaltyLedger, returns, sales } from '../../infrastructure/database/schema';
 
@@ -10,8 +10,10 @@ export class LoyaltyLedgerService {
     const [config] = await tx.select().from(loyaltyConfigurations)
       .where(eq(loyaltyConfigurations.businessId, input.businessId));
     if (!config?.enabled || config.earnPointsPer1000 <= 0) return 0;
-    const cents = Math.round(Number(input.total) * 100);
-    const points = Math.floor((cents * config.earnPointsPer1000) / 100000);
+    const cents = BigInt(Math.round(Number(input.total) * 100));
+    const pointsValue = (cents * BigInt(config.earnPointsPer1000)) / 100000n;
+    if (pointsValue > 2147483647n) throw new BadRequestException('Loyalty award exceeds the supported points range');
+    const points = Number(pointsValue);
     if (points <= 0) return 0;
     await tx.insert(loyaltyLedger).values({
       businessId: input.businessId,
@@ -53,8 +55,10 @@ export class LoyaltyLedgerService {
         eq(loyaltyLedger.relatedSaleId, input.saleId),
         eq(loyaltyLedger.eventType, 'RETURN_REVERSAL'),
       ));
-    const ratio = Math.min(1, Math.max(0, Number(returned?.total ?? 0) / Number(sale.total)));
-    const targetReversal = Math.min(earnedPoints, Math.floor(earnedPoints * ratio));
+    const saleCents = BigInt(Math.round(Number(sale.total) * 100));
+    const returnedCents = BigInt(Math.max(0, Math.round(Number(returned?.total ?? 0) * 100)));
+    const cappedReturnedCents = returnedCents > saleCents ? saleCents : returnedCents;
+    const targetReversal = Math.min(earnedPoints, Number((BigInt(earnedPoints) * cappedReturnedCents) / saleCents));
     const delta = targetReversal - Math.max(0, alreadyReversed?.points ?? 0);
     if (delta <= 0) return 0;
 
