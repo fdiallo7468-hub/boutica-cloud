@@ -127,6 +127,13 @@
       "when": 1794391000000,
       "tag": "0017_accounting_entries_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794392000000,
+      "tag": "0018_accounting_operational_mappings",
+      "breakpoints": true
     }
   ]
 }
