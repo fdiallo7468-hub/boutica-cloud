@@ -93,7 +93,7 @@ describe('ReportsController - Endpoints PDF', () => {
       mockReportsService.exportInventoryPdf.mockRejectedValue(error);
 
       await expect(
-        controller.exportInventoryPdf(tenant, mockResponse as Response),
+        controller.exportInventoryPdf(tenant, undefined, mockResponse as Response),
       ).rejects.toThrow(InternalServerErrorException);
 
       expect(mockResponse.setHeader).not.toHaveBeenCalledWith('Content-Type', 'application/pdf');
