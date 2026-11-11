@@ -87,7 +87,7 @@ export class InventoryController {
           action: 'stock.adjusted',
           resourceType: 'variant',
           resourceId: variantId,
-          metadata: { previousQuantity, newQuantity: body.quantity, delta, note: body.note ?? null },
+          metadata: { previousQuantity, newQuantity: body.quantity, delta },
         });
       }
 
