@@ -20,6 +20,14 @@ describe('SYSCOHADA accounting money helpers', () => {
     expect(() => accountingAmountToMinorUnits(value)).toThrow(BadRequestException);
   });
 
+  it.each([1.25, Number.MAX_SAFE_INTEGER + 1])('rejects unsafe numeric monetary inputs %s', (value) => {
+    expect(() => accountingAmountToMinorUnits(value)).toThrow(BadRequestException);
+  });
+
+  it('rejects values exceeding NUMERIC(18,2) precision', () => {
+    expect(() => accountingAmountToMinorUnits('10000000000000000.00')).toThrow(BadRequestException);
+  });
+
   it('formats positive and negative minor units without floating point', () => {
     expect(minorUnitsToAccountingAmount(123456789012345678n)).toBe('1234567890123456.78');
     expect(minorUnitsToAccountingAmount(-1234n)).toBe('-12.34');
