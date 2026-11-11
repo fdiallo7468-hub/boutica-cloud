@@ -11,10 +11,12 @@ CREATE TABLE public.loyalty_configurations (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 --> statement-breakpoint
+ALTER TABLE public.customers ADD CONSTRAINT customers_business_id_id_unique UNIQUE (business_id, id);
+--> statement-breakpoint
 CREATE TABLE public.loyalty_ledger (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE RESTRICT,
-  customer_id uuid NOT NULL REFERENCES public.customers(id) ON DELETE RESTRICT,
+  customer_id uuid NOT NULL,
   actor_user_id text REFERENCES public.users(id) ON DELETE SET NULL,
   points_delta integer NOT NULL CHECK (points_delta <> 0),
   event_type text NOT NULL CHECK (event_type IN ('SALE_EARN','RETURN_REVERSAL','MANUAL_ADJUSTMENT')),
@@ -23,7 +25,8 @@ CREATE TABLE public.loyalty_ledger (
   idempotency_key text NOT NULL,
   note text,
   created_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT loyalty_ledger_business_idempotency_unique UNIQUE (business_id, idempotency_key)
+  CONSTRAINT loyalty_ledger_business_idempotency_unique UNIQUE (business_id, idempotency_key),
+  CONSTRAINT loyalty_ledger_business_customer_fk FOREIGN KEY (business_id, customer_id) REFERENCES public.customers(business_id, id) ON DELETE RESTRICT
 );
 --> statement-breakpoint
 CREATE INDEX loyalty_ledger_customer_time_idx ON public.loyalty_ledger (business_id, customer_id, created_at DESC);
