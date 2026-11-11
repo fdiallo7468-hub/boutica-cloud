@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { DatabaseService } from '../../src/infrastructure/database/database';
 import { createTestApp, registerBusiness, resetDatabase } from '../utils/test-app';
+import { suppliers } from '../../src/infrastructure/database/schema';
 
 describe('Accounting operational posting (e2e)', () => {
   let app: INestApplication;
@@ -66,8 +67,8 @@ describe('Accounting operational posting (e2e)', () => {
     expect(expense.body.accounting).toMatchObject({ status: 'NOT_CONFIGURED', entryId: null });
   });
 
-  it('records opening balances and exposes the customer auxiliary ledger', async () => {
-    const { accessToken } = await registerBusiness(app, 'Accounting opening balance');
+  it('reconciles opening balances, customer/supplier auxiliaries and the trial balance', async () => {
+    const { accessToken, businessId } = await registerBusiness(app, 'Accounting opening balance');
     const auth = { Authorization: `Bearer ${accessToken}` };
     const year = new Date().getUTCFullYear();
     const date = `${year}-01-01`;
@@ -85,20 +86,71 @@ describe('Accounting operational posting (e2e)', () => {
       .send({ accountNumber: '101', label: 'Capital', class: 1, normalBalance: 'CREDIT', isPostable: true }).expect(201);
     const customer = await request(app.getHttpServer()).post('/api/v1/customers').set(auth)
       .send({ name: 'Client auxiliaire' }).expect(201);
+    const customerOpeningPayload = {
+      journalId: journal.body.id, periodId: period.body.id, entryDate: date,
+      description: 'À-nouveaux exercice', idempotencyKey: 'opening-fy-test',
+      lines: [
+        { accountId: customerAccount.body.id, debit: '25000.00', auxiliaryType: 'CUSTOMER' as const, auxiliaryId: customer.body.id },
+        { accountId: equityAccount.body.id, credit: '25000.00' },
+      ],
+    };
     const opening = await request(app.getHttpServer()).post('/api/v1/accounting/opening-balances').set(auth)
+      .send(customerOpeningPayload).expect(201);
+    expect(opening.body.status).toBe('POSTED');
+    const openingRetry = await request(app.getHttpServer()).post('/api/v1/accounting/opening-balances').set(auth)
+      .send(customerOpeningPayload).expect(201);
+    expect(openingRetry.body.id).toBe(opening.body.id);
+
+    const [supplier] = await app.get(DatabaseService).db.insert(suppliers).values({
+      businessId, name: 'Fournisseur auxiliaire',
+    }).returning();
+    const supplierAccount = await request(app.getHttpServer()).post('/api/v1/accounting/accounts').set(auth)
+      .send({ accountNumber: '401', label: 'Fournisseurs', class: 4, normalBalance: 'CREDIT', isPostable: true }).expect(201);
+    const supplierOpening = await request(app.getHttpServer()).post('/api/v1/accounting/opening-balances').set(auth)
       .send({
         journalId: journal.body.id, periodId: period.body.id, entryDate: date,
-        description: 'À-nouveaux exercice', idempotencyKey: 'opening-fy-test',
+        description: 'Solde fournisseur à-nouveaux', idempotencyKey: 'opening-fy-supplier',
         lines: [
-          { accountId: customerAccount.body.id, debit: '25000.00', auxiliaryType: 'CUSTOMER', auxiliaryId: customer.body.id },
-          { accountId: equityAccount.body.id, credit: '25000.00' },
+          { accountId: supplierAccount.body.id, credit: '10000.00', auxiliaryType: 'SUPPLIER', auxiliaryId: supplier.id },
+          { accountId: equityAccount.body.id, debit: '10000.00' },
         ],
       }).expect(201);
-    expect(opening.body.status).toBe('POSTED');
-    const auxiliary = await request(app.getHttpServer())
+    expect(supplierOpening.body.status).toBe('POSTED');
+
+    const customerLedger = await request(app.getHttpServer())
       .get(`/api/v1/accounting/customers/${customer.body.id}/ledger`).set(auth).expect(200);
-    expect(auxiliary.body).toHaveLength(1);
-    expect(auxiliary.body[0]).toMatchObject({ debit: '25000.00', credit: '0.00', balance: '25000.00' });
+    expect(customerLedger.body).toHaveLength(1);
+    expect(customerLedger.body[0]).toMatchObject({ debit: '25000.00', credit: '0.00', balance: '25000.00' });
+    const supplierLedger = await request(app.getHttpServer())
+      .get(`/api/v1/accounting/suppliers/${supplier.id}/ledger`).set(auth).expect(200);
+    expect(supplierLedger.body).toHaveLength(1);
+    expect(supplierLedger.body[0]).toMatchObject({ debit: '0.00', credit: '10000.00', balance: '-10000.00' });
+
+    const generalLedger = await request(app.getHttpServer())
+      .get(`/api/v1/accounting/accounts/${customerAccount.body.id}/ledger`).set(auth).expect(200);
+    expect(generalLedger).toBeDefined();
+    expect(generalLedger.body).toHaveLength(1);
+    expect(generalLedger.body[0].balance).toBe('25000.00');
+
+    const trialBalance = await request(app.getHttpServer()).get('/api/v1/accounting/trial-balance').set(auth).expect(200);
+    expect(trialBalance.body.totals).toMatchObject({ debit: '35000.00', credit: '35000.00', balanced: true });
+    expect(trialBalance.body.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ accountId: customerAccount.body.id, debit: '25000.00', credit: '0.00' }),
+      expect.objectContaining({ accountId: supplierAccount.body.id, debit: '0.00', credit: '10000.00' }),
+    ]));
+
+    const foreignBusiness = await registerBusiness(app, 'Foreign accounting auxiliary');
+    const foreignCustomer = await request(app.getHttpServer()).post('/api/v1/customers')
+      .set('Authorization', `Bearer ${foreignBusiness.accessToken}`).send({ name: 'Client autre entreprise' }).expect(201);
+    await request(app.getHttpServer()).post('/api/v1/accounting/opening-balances').set(auth)
+      .send({
+        journalId: journal.body.id, periodId: period.body.id, entryDate: date,
+        description: 'Tentative de tiers inter-entreprise', idempotencyKey: 'foreign-auxiliary-test',
+        lines: [
+          { accountId: customerAccount.body.id, debit: '100.00', auxiliaryType: 'CUSTOMER', auxiliaryId: foreignCustomer.body.id },
+          { accountId: equityAccount.body.id, credit: '100.00' },
+        ],
+      }).expect(400);
   });
 
 });
