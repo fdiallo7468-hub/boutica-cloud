@@ -34,7 +34,7 @@ export class SyncService {
     private readonly db: DatabaseService,
     private readonly financeService: FinanceService,
     private readonly outboxService: NotificationOutboxService,
-    private readonly loyaltyLedger: LoyaltyLedgerService,
+    private readonly loyaltyLedger: LoyaltyLedgerService = new LoyaltyLedgerService(),
   ) {}
 
   /**
