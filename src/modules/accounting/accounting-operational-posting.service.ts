@@ -1,5 +1,5 @@
 import { ConflictException, Injectable } from '@nestjs/common';
-import { and, eq, gte, lte, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
 import { accountingAccounts, accountingEntries, accountingEntryLines, accountingEventMappings, accountingJournals, accountingPeriods } from '../../infrastructure/database/schema';
 import { accountingAmountToMinorUnits, minorUnitsToAccountingAmount } from './accounting-money';
@@ -22,21 +22,22 @@ export class AccountingOperationalPostingService {
     if (!mapping) return { status: 'NOT_CONFIGURED' as const, entryId: null };
 
     const entryDate = expense.createdAt.toISOString().slice(0, 10);
+    // Use the same journal -> period lock order as manual postings and reversals.
+    const [journal] = await tx.select().from(accountingJournals).where(and(
+      eq(accountingJournals.id, mapping.journalId), eq(accountingJournals.businessId, tenant.businessId),
+      eq(accountingJournals.isActive, true),
+    )).for('update').limit(1);
+    if (!journal) throw new ConflictException('The configured expense journal is no longer active');
     const [period] = await tx.select().from(accountingPeriods).where(and(
       eq(accountingPeriods.businessId, tenant.businessId),
       lte(accountingPeriods.startDate, entryDate),
       gte(accountingPeriods.endDate, entryDate),
     )).for('update').limit(1);
     if (!period || period.status !== 'OPEN') throw new ConflictException('A mapped expense requires an open accounting period covering its date');
-    const [journal] = await tx.select().from(accountingJournals).where(and(
-      eq(accountingJournals.id, mapping.journalId), eq(accountingJournals.businessId, tenant.businessId),
-      eq(accountingJournals.isActive, true),
-    )).for('update').limit(1);
-    if (!journal) throw new ConflictException('The configured expense journal is no longer active');
 
     const accounts = await tx.select().from(accountingAccounts).where(and(
       eq(accountingAccounts.businessId, tenant.businessId),
-      sql`${accountingAccounts.id} IN (${sql.join([sql`${mapping.debitAccountId}::uuid`, sql`${mapping.creditAccountId}::uuid`], sql`, `)})`,
+      inArray(accountingAccounts.id, [mapping.debitAccountId, mapping.creditAccountId]),
     ));
     if (accounts.length !== 2 || accounts.some((account: { isActive: boolean; isPostable: boolean }) => !account.isActive || !account.isPostable)) {
       throw new ConflictException('A configured expense account is inactive or not postable');
