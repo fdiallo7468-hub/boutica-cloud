@@ -77,6 +77,9 @@ export class CustomersController {
     if (start) filters.push(gte(sales.createdAt, start));
     if (end) filters.push(lte(sales.createdAt, end));
     if (locationId) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(locationId)) {
+        throw new BadRequestException('Invalid location ID');
+      }
       const [location] = await this.db.db.select({ id: businessLocations.id }).from(businessLocations).where(and(
         eq(businessLocations.id, locationId), eq(businessLocations.businessId, tenant.businessId), eq(businessLocations.isActive, true),
       ));
