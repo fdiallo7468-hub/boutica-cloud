@@ -328,7 +328,7 @@ export class FinanceService {
         action: 'payment.cancelled',
         resourceType: 'payment',
         resourceId: paymentId,
-        metadata: { amount: payment.amount, receiptNumber: payment.receiptNumber, reason: dto.reason.trim() },
+        metadata: { amount: payment.amount, receiptNumber: payment.receiptNumber },
       });
       return {
         success: true,
