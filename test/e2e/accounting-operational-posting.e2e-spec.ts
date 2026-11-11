@@ -2,7 +2,8 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { DatabaseService } from '../../src/infrastructure/database/database';
 import { createTestApp, registerBusiness, resetDatabase } from '../utils/test-app';
-import { suppliers } from '../../src/infrastructure/database/schema';
+import { accountingEntries, suppliers } from '../../src/infrastructure/database/schema';
+import { eq } from 'drizzle-orm';
 
 describe('Accounting operational posting (e2e)', () => {
   let app: INestApplication;
@@ -151,6 +152,94 @@ describe('Accounting operational posting (e2e)', () => {
           { accountId: equityAccount.body.id, credit: '100.00' },
         ],
       }).expect(400);
+  });
+
+  it('enforces fiscal-year, period and account hierarchy invariants', async () => {
+    const { accessToken } = await registerBusiness(app, 'Accounting foundations invariants');
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const year = new Date().getUTCFullYear();
+    const startDate = `${year}-01-01`;
+    const endDate = `${year}-12-31`;
+    await request(app.getHttpServer()).put('/api/v1/accounting/profile').set(auth).send({}).expect(200);
+
+    const fiscalYear = await request(app.getHttpServer()).post('/api/v1/accounting/fiscal-years').set(auth)
+      .send({ code: `FY-${year}`, label: `Exercice ${year}`, startDate, endDate }).expect(201);
+    await request(app.getHttpServer()).post('/api/v1/accounting/fiscal-years').set(auth)
+      .send({ code: `FY-${year}-OVERLAP`, label: 'Exercice chevauchant', startDate: `${year}-06-01`, endDate })
+      .expect(409);
+
+    const period = await request(app.getHttpServer()).post('/api/v1/accounting/periods').set(auth)
+      .send({ fiscalYearId: fiscalYear.body.id, code: `P-${year}`, label: `Période ${year}`, startDate, endDate }).expect(201);
+    await request(app.getHttpServer()).post('/api/v1/accounting/periods').set(auth)
+      .send({ fiscalYearId: fiscalYear.body.id, code: `P-${year}-OVERLAP`, label: 'Période chevauchante',
+        startDate: `${year}-02-01`, endDate: `${year}-03-01` }).expect(409);
+
+    const parent = await request(app.getHttpServer()).post('/api/v1/accounting/accounts').set(auth)
+      .send({ accountNumber: '41', label: 'Tiers', class: 4, normalBalance: 'DEBIT', isPostable: false }).expect(201);
+    await request(app.getHttpServer()).post('/api/v1/accounting/accounts').set(auth)
+      .send({ accountNumber: '411', label: 'Clients', class: 4, parentAccountId: parent.body.id,
+        normalBalance: 'DEBIT', isPostable: true }).expect(201);
+    await request(app.getHttpServer()).patch(`/api/v1/accounting/accounts/${parent.body.id}`).set(auth)
+      .send({ isPostable: true }).expect(409);
+
+    await request(app.getHttpServer()).patch(`/api/v1/accounting/periods/${period.body.id}/status`).set(auth)
+      .send({ status: 'CLOSED' }).expect(200);
+    await request(app.getHttpServer()).patch(`/api/v1/accounting/periods/${period.body.id}/status`).set(auth)
+      .send({ status: 'LOCKED' }).expect(200);
+    await request(app.getHttpServer()).patch(`/api/v1/accounting/periods/${period.body.id}/status`).set(auth)
+      .send({ status: 'CLOSED' }).expect(409);
+  });
+
+  it('posts idempotently, reverses once and protects posted entries at database level', async () => {
+    const { accessToken } = await registerBusiness(app, 'Accounting reversal invariants');
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const year = new Date().getUTCFullYear();
+    const date = `${year}-01-01`;
+    const endDate = `${year}-12-31`;
+    await request(app.getHttpServer()).put('/api/v1/accounting/profile').set(auth).send({}).expect(200);
+    const fiscalYear = await request(app.getHttpServer()).post('/api/v1/accounting/fiscal-years').set(auth)
+      .send({ code: `FY-${year}`, label: `Exercice ${year}`, startDate: date, endDate }).expect(201);
+    const period = await request(app.getHttpServer()).post('/api/v1/accounting/periods').set(auth)
+      .send({ fiscalYearId: fiscalYear.body.id, code: `P-${year}`, label: `Période ${year}`, startDate: date, endDate }).expect(201);
+    const journal = await request(app.getHttpServer()).post('/api/v1/accounting/journals').set(auth)
+      .send({ code: 'OD', label: 'Opérations diverses', journalType: 'GENERAL', sequencePrefix: 'OD-' }).expect(201);
+    const debitAccount = await request(app.getHttpServer()).post('/api/v1/accounting/accounts').set(auth)
+      .send({ accountNumber: '411', label: 'Clients', class: 4, normalBalance: 'DEBIT', isPostable: true }).expect(201);
+    const creditAccount = await request(app.getHttpServer()).post('/api/v1/accounting/accounts').set(auth)
+      .send({ accountNumber: '101', label: 'Capital', class: 1, normalBalance: 'CREDIT', isPostable: true }).expect(201);
+    const payload = {
+      journalId: journal.body.id, periodId: period.body.id, entryDate: date,
+      description: 'Écriture de test', idempotencyKey: 'entry-idempotency-test',
+      lines: [
+        { accountId: debitAccount.body.id, debit: '100.00' },
+        { accountId: creditAccount.body.id, credit: '100.00' },
+      ],
+    };
+    const posted = await request(app.getHttpServer()).post('/api/v1/accounting/entries').set(auth).send(payload).expect(201);
+    expect(posted.body.status).toBe('POSTED');
+    const retry = await request(app.getHttpServer()).post('/api/v1/accounting/entries').set(auth).send(payload).expect(201);
+    expect(retry.body.id).toBe(posted.body.id);
+    await request(app.getHttpServer()).post('/api/v1/accounting/entries').set(auth)
+      .send({ ...payload, lines: [
+        { accountId: debitAccount.body.id, debit: '101.00' },
+        { accountId: creditAccount.body.id, credit: '101.00' },
+      ] }).expect(409);
+
+    const reversal = await request(app.getHttpServer()).post(`/api/v1/accounting/entries/${posted.body.id}/reverse`)
+      .set(auth).send({ periodId: period.body.id, entryDate: date }).expect(201);
+    expect(reversal.body.status).toBe('POSTED');
+    await request(app.getHttpServer()).post(`/api/v1/accounting/entries/${posted.body.id}/reverse`)
+      .set(auth).send({ periodId: period.body.id, entryDate: date }).expect(409);
+
+    await expect(app.get(DatabaseService).db.update(accountingEntries).set({ description: 'Tentative de modification' })
+      .where(eq(accountingEntries.id, posted.body.id))).rejects.toThrow();
+
+    const ledger = await request(app.getHttpServer()).get(`/api/v1/accounting/accounts/${debitAccount.body.id}/ledger`)
+      .set(auth).expect(200);
+    expect(ledger.body).toHaveLength(2);
+    expect(ledger.body[1].balance).toBe('0.00');
+    const trialBalance = await request(app.getHttpServer()).get('/api/v1/accounting/trial-balance').set(auth).expect(200);
+    expect(trialBalance.body.totals).toMatchObject({ debit: '200.00', credit: '200.00', balanced: true });
   });
 
 });
