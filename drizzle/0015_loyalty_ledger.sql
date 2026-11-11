@@ -32,7 +32,7 @@ CREATE TABLE public.loyalty_ledger (
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT loyalty_ledger_business_idempotency_unique UNIQUE (business_id, idempotency_key),
   CONSTRAINT loyalty_ledger_non_zero_delta CHECK (points_delta <> 0),
-  CONSTRAINT loyalty_ledger_event_type_valid CHECK (event_type IN ('SALE_EARN','RETURN_REVERSAL','MANUAL_ADJUSTMENT')),
+  CONSTRAINT loyalty_ledger_event_type_valid CHECK (event_type IN ('SALE_EARN','RETURN_REVERSAL','SALE_CANCELLATION_REVERSAL','MANUAL_ADJUSTMENT')),
   CONSTRAINT loyalty_ledger_business_customer_fk FOREIGN KEY (business_id, customer_id) REFERENCES public.customers(business_id, id) ON DELETE RESTRICT
 );
 --> statement-breakpoint
