@@ -1,6 +1,6 @@
 # Boutica Cloud 3.0 — Phase 3: Management, BI & CRM
 
-**Status:** In progress — CRM search and BI KPI/period-comparison increment implemented; loyalty and remaining BI work pending  
+**Status:** Implementation in progress — CRM metrics/search/segments, BI KPI baseline and transactional loyalty ledger are being integrated and validated  
 **Branch / PR:** `feat/boutica-cloud-v3-foundation` / PR #5  
 **Prerequisites:** Phase 1 development gate accepted; Phase 2 operations and location-aware inventory integrated.
 
@@ -18,7 +18,7 @@ Give business owners and managers a reliable view of business performance and to
 The existing `GET /api/v1/reports/dashboard` and Excel/PDF exports are the starting point. Evolve them into a consistent reporting layer:
 - Date-range validation, inclusive/exclusive boundary consistency and safe defaults.
 - Revenue, completed sales count, average basket, gross margin estimate, expenses, estimated operating result, outstanding/overdue receivables and inventory valuation.
-- Time-series breakdowns (day/week/month) and previous-period comparison.
+- Time-series breakdowns (day/week/month), previous-period comparison and validated location filters.
 - Top products/variants, low-stock alerts and recent sales.
 - Location-aware filters using server-validated location IDs; organization-wide totals remain the default.
 - Export parity: report totals and filters must match dashboard calculations.
@@ -28,6 +28,7 @@ The existing `GET /api/v1/reports/dashboard` and Excel/PDF exports are the start
 - `GET /api/v1/customers/segments` groups active customers into deterministic new, active, at-risk, inactive and high-value segments; its thresholds are returned in the API response.
 - `GET /api/v1/customers?search=...` now supports tenant-scoped partial matching on customer name and phone while preserving pagination and archive filtering.
 - `GET /api/v1/customers/:id/summary` provides completed-sale count, lifetime value, average basket and last purchase, with cross-tenant 404 behavior.
+- Loyalty endpoints: `GET/PUT /api/v1/loyalty/configuration` and `GET /api/v1/loyalty/customers/:customerId`.
 
 ## Workstream B — CRM
 
@@ -36,6 +37,7 @@ Extend the existing customer module:
 - Customer purchase history, lifetime spend, order count, average basket and last purchase.
 - Segmentation based on deterministic rules (new, active, at-risk, inactive, high-value); thresholds configurable and documented.
 - Search, pagination and date/location filters.
+- Customer sales history is available through the existing tenant-scoped sales listing filtered by `customerId`; a dedicated CRM history response remains desirable.
 - Preserve historical sales and receivables when a customer is archived.
 - All queries and nested resources remain scoped to the authenticated business.
 
@@ -46,6 +48,7 @@ Introduce a ledger-based loyalty foundation only after CRM identity and transact
 - Append-only points ledger with source transaction, actor, tenant and idempotency key.
 - Earn points only from completed, non-cancelled sales; reverse/adjust points on returns and cancellations.
 - Prevent negative balances and duplicate awards.
+- Implemented migration `0015_loyalty_ledger.sql`, per-business configuration, unique idempotency keys, immutable database trigger and transaction-bound sale awards/return reversals. Redemption is intentionally not exposed until the ledger and redemption accounting are separately verified.
 - Do not add customer-facing redemption until ledger invariants and tests are in place.
 
 ## Delivery order
@@ -68,5 +71,5 @@ Introduce a ledger-based loyalty foundation only after CRM identity and transact
 - Date filters and location filters produce deterministic, documented results.
 - Dashboard and exports agree on totals.
 - CRM metrics reconcile with underlying sales and returns.
-- Loyalty ledger is append-only, idempotent and correctly reversed for returns/cancellations.
+- Loyalty ledger is append-only and idempotent; proportional return reversals are transaction-bound and tested. Sale cancellation reversal remains pending if/when a supported cancellation workflow is introduced.
 - Lint, unit tests, PostgreSQL integration tests and production build pass on PR #5.
