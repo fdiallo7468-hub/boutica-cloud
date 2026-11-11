@@ -93,13 +93,20 @@ describe('CreateSaleUseCase notification events', () => {
         insertedEvents.push(event);
       }),
     } as any;
-    const useCase = new CreateSaleUseCase(database, mockOutboxService);
+    const mockAuditEventsService = {
+      appendInTransaction: jest.fn().mockResolvedValue('audit-event-1'),
+    };
+    const useCase = new CreateSaleUseCase(database, mockOutboxService, undefined, mockAuditEventsService);
 
     const result = await useCase.execute(tenant, {
       items: [{ variantId, quantity: 1 }],
     }, undefined);
 
     expect(result.replayed).toBe(false);
+    expect(mockAuditEventsService.appendInTransaction).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ action: 'sale.created', resourceType: 'sale' }),
+    );
     expect(insertedEvents).toHaveLength(2);
     expect(insertedEvents.map((event) => event.eventType)).toEqual([
       'sale.completed',
