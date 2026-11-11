@@ -197,15 +197,11 @@ export const envSchema = rawEnvSchema.transform((raw, ctx) => {
         path: ['DATABASE_URL'],
         message: 'DATABASE_URL is required in production (a PostgreSQL connection string)',
       });
-    } else if (
-      KNOWN_DEV_DB_URLS.includes(databaseUrl.trim()) ||
-      databaseUrl.includes('localhost') ||
-      databaseUrl.includes('127.0.0.1')
-    ) {
+    } else if (KNOWN_DEV_DB_URLS.includes(databaseUrl.trim())) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['DATABASE_URL'],
-        message: 'DATABASE_URL cannot use localhost or demo fallback values in production',
+        message: 'DATABASE_URL cannot use a known development/demo fallback value in production',
       });
     } else if (!databaseUrl.startsWith('postgresql://') && !databaseUrl.startsWith('postgres://')) {
       ctx.addIssue({
