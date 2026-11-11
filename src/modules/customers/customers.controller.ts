@@ -12,7 +12,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { and, count, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, count, eq, gte, ilike, lte, or, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
 import { businessLocations, customers, returns, sales } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
