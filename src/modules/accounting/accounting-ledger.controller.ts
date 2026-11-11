@@ -13,7 +13,7 @@ export class AccountingLedgerController {
     @Body() body: {
       journalId: string; periodId: string; entryDate: string; description: string;
       sourceType?: string; sourceId?: string; idempotencyKey?: string;
-      lines: Array<{ accountId: string; description?: string; debit?: string | number; credit?: string | number }>;
+      lines: Array<{ accountId: string; description?: string; debit?: string | number; credit?: string | number; auxiliaryType?: 'CUSTOMER' | 'SUPPLIER'; auxiliaryId?: string }>;
     },
   ) {
     return this.ledger.createAndPost(tenant, body, tenant.userId);
@@ -37,6 +37,21 @@ export class AccountingLedgerController {
     @Body() body: { periodId: string; entryDate: string },
   ) {
     return this.ledger.reverse(tenant, entryId, body.periodId, body.entryDate, tenant.userId);
+  }
+
+  @Post('opening-balances')
+  openingBalance(@CurrentTenant() tenant: Tenant, @Body() body: any) {
+    return this.ledger.openingBalance(tenant, body, tenant.userId);
+  }
+
+  @Get('customers/:customerId/ledger')
+  customerLedger(@CurrentTenant() tenant: Tenant, @Param('customerId') id: string, @Query('from') from?: string, @Query('to') to?: string) {
+    return this.ledger.auxiliaryLedger(tenant, 'CUSTOMER', id, from, to);
+  }
+
+  @Get('suppliers/:supplierId/ledger')
+  supplierLedger(@CurrentTenant() tenant: Tenant, @Param('supplierId') id: string, @Query('from') from?: string, @Query('to') to?: string) {
+    return this.ledger.auxiliaryLedger(tenant, 'SUPPLIER', id, from, to);
   }
 
   @Get('accounts/:accountId/ledger')
