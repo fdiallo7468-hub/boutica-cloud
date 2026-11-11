@@ -17,6 +17,8 @@ type EntryLineInput = {
   description?: string;
   debit?: string | number;
   credit?: string | number;
+  auxiliaryType?: 'CUSTOMER' | 'SUPPLIER';
+  auxiliaryId?: string;
 };
 
 type CreateEntryInput = {
@@ -71,7 +73,9 @@ export class AccountingLedgerService {
       if ((debit > 0n) === (credit > 0n)) {
         throw new BadRequestException(`Line ${index + 1} must contain either a debit or a credit, not both`);
       }
-      return { accountId: line.accountId, description: line.description?.trim() || null, debit, credit };
+      if (Boolean(line.auxiliaryType) !== Boolean(line.auxiliaryId)) throw new BadRequestException(`Line ${index + 1}: auxiliaryType and auxiliaryId must be supplied together`);
+      if (line.auxiliaryType && !['CUSTOMER', 'SUPPLIER'].includes(line.auxiliaryType)) throw new BadRequestException(`Line ${index + 1}: invalid auxiliaryType`);
+      return { accountId: line.accountId, description: line.description?.trim() || null, debit, credit, auxiliaryType: line.auxiliaryType, auxiliaryId: line.auxiliaryId };
     });
     const debitTotal = normalized.reduce((sum, line) => sum + line.debit, 0n);
     const creditTotal = normalized.reduce((sum, line) => sum + line.credit, 0n);
@@ -114,6 +118,13 @@ export class AccountingLedgerService {
       if (period.status !== 'OPEN') throw new ConflictException('Accounting period is not open');
       if (entryDate < period.startDate || entryDate > period.endDate) {
         throw new BadRequestException('entryDate must fall within the selected accounting period');
+      }
+
+      for (const line of normalized) {
+        if (!line.auxiliaryId) continue;
+        const table = line.auxiliaryType === 'CUSTOMER' ? 'customers' : 'suppliers';
+        const result = await tx.execute(sql.raw('SELECT id FROM public.' + table + ' WHERE business_id = $1 AND id = $2'), [tenant.businessId, line.auxiliaryId]);
+        if (!result.rows?.length) throw new BadRequestException('Auxiliary third party does not belong to this business');
       }
 
       const accountIds = [...new Set(normalized.map((line) => line.accountId))];
@@ -161,6 +172,8 @@ export class AccountingLedgerService {
         lineNumber: index + 1,
         accountId: line.accountId,
         description: line.description,
+        customerId: line.auxiliaryType === 'CUSTOMER' ? line.auxiliaryId : null,
+        supplierId: line.auxiliaryType === 'SUPPLIER' ? line.auxiliaryId : null,
         debit: minorUnitsToAccountingAmount(line.debit),
         credit: minorUnitsToAccountingAmount(line.credit),
       })));
@@ -222,6 +235,8 @@ export class AccountingLedgerService {
         lineNumber: index + 1,
         accountId: line.accountId,
         description: line.description,
+        customerId: line.customerId,
+        supplierId: line.supplierId,
         debit: line.credit,
         credit: line.debit,
       })));
@@ -237,7 +252,7 @@ export class AccountingLedgerService {
     if (!Number.isInteger(requestedLimit) || requestedLimit < 1) throw new BadRequestException('limit must be a positive integer');
     const limit = Math.min(requestedLimit, 200);
     const range = validateDateRange(filters.from, filters.to);
-    const conditions = [eq(accountingEntries.businessId, tenant.businessId)];
+    const conditions = [eq(accountingEntries.businessId, tenant.businessId), eq(accountingEntries.status, 'POSTED')];
     if (range.from) conditions.push(gte(accountingEntries.entryDate, range.from));
     if (range.to) conditions.push(lte(accountingEntries.entryDate, range.to));
     if (filters.periodId) conditions.push(eq(accountingEntries.periodId, filters.periodId));
@@ -251,6 +266,7 @@ export class AccountingLedgerService {
     const conditions = [
       eq(accountingEntryLines.businessId, tenant.businessId),
       eq(accountingEntryLines.accountId, accountId),
+      eq(accountingEntries.status, 'POSTED'),
     ];
     if (range.from) conditions.push(gte(accountingEntries.entryDate, range.from));
     if (range.to) conditions.push(lte(accountingEntries.entryDate, range.to));
@@ -309,6 +325,44 @@ export class AccountingLedgerService {
         balanced: totalDebit === totalCredit,
       },
     };
+  }
+
+
+  async auxiliaryLedger(tenant: Tenant, type: 'CUSTOMER' | 'SUPPLIER', auxiliaryId: string, from?: string, to?: string) {
+    const range = validateDateRange(from, to);
+    const column = type === 'CUSTOMER' ? accountingEntryLines.customerId : accountingEntryLines.supplierId;
+    const conditions = [
+      eq(accountingEntryLines.businessId, tenant.businessId),
+      eq(column, auxiliaryId),
+      eq(accountingEntries.status, 'POSTED'),
+    ];
+    if (range.from) conditions.push(gte(accountingEntries.entryDate, range.from));
+    if (range.to) conditions.push(lte(accountingEntries.entryDate, range.to));
+    const rows = await this.database.db.select({
+      entryId: accountingEntries.id, entryNumber: accountingEntries.entryNumber,
+      entryDate: accountingEntries.entryDate, description: accountingEntries.description,
+      accountId: accountingEntryLines.accountId, debit: accountingEntryLines.debit,
+      credit: accountingEntryLines.credit,
+    }).from(accountingEntryLines).innerJoin(accountingEntries, and(
+      eq(accountingEntries.id, accountingEntryLines.entryId),
+      eq(accountingEntries.businessId, accountingEntryLines.businessId),
+    )).where(and(...conditions)).orderBy(asc(accountingEntries.entryDate), asc(accountingEntries.entryNumber));
+    let debit = 0n, credit = 0n;
+    return rows.map((row) => {
+      debit += accountingAmountToMinorUnits(row.debit);
+      credit += accountingAmountToMinorUnits(row.credit);
+      return { ...row, cumulativeDebit: minorUnitsToAccountingAmount(debit), cumulativeCredit: minorUnitsToAccountingAmount(credit), balance: minorUnitsToAccountingAmount(debit-credit) };
+    });
+  }
+
+  async openingBalance(tenant: Tenant, input: CreateEntryInput, actorId?: string) {
+    const [journal] = await this.database.db.select().from(accountingJournals).where(and(
+      eq(accountingJournals.id, input.journalId), eq(accountingJournals.businessId, tenant.businessId),
+    )).limit(1);
+    if (!journal || journal.journalType !== 'OPENING' || !journal.isActive) {
+      throw new BadRequestException('An active OPENING journal belonging to this business is required');
+    }
+    return this.createAndPost(tenant, { ...input, sourceType: 'OPENING', sourceId: input.sourceId ?? input.idempotencyKey ?? input.entryDate }, actorId);
   }
 
   private async loadEntry(executor: any, businessId: string, entryId: string) {
