@@ -9,7 +9,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { fromNodeHeaders } from "better-auth/node";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Request } from "express";
 import { auth } from "../../auth/auth";
 import { DatabaseService } from "../../infrastructure/database/database";
@@ -85,7 +85,11 @@ export class OnboardingController {
 
     // Lock and re-check the user inside the same transaction. This prevents
     // two simultaneous onboarding requests from creating two businesses.
-    const result = await this.db.db.transaction(async (tx) => {
+    const result = await this.db.baseDb.transaction(async (tx) => {
+      await tx.execute(sql`
+        SELECT set_config('app.actor_user_id', ${userId}, true)
+      `);
+
       const [lockedUser] = await tx
         .select({ id: users.id, businessId: users.businessId })
         .from(users)
@@ -113,6 +117,10 @@ export class OnboardingController {
       if (!business) {
         throw new Error("Impossible d'insérer l'entreprise");
       }
+
+      await tx.execute(sql`
+        SELECT set_config('app.business_id', ${business.id}, true)
+      `);
 
       // 1. Insert business membership
       const memberInsert = tx
