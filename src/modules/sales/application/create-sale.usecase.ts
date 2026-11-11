@@ -26,7 +26,7 @@ export class CreateSaleUseCase {
   constructor(
     private readonly db: DatabaseService,
     private readonly outboxService: NotificationOutboxService,
-    private readonly loyaltyLedger: LoyaltyLedgerService,
+    private readonly loyaltyLedger: LoyaltyLedgerService = new LoyaltyLedgerService(),
   ) {}
 
   async execute(tenant: Tenant, dto: CreateSaleDto, idempotencyKey: string | undefined): Promise<CreateSaleResult> {
