@@ -2,6 +2,7 @@ import { Controller, Get, NotFoundException, Param, ParseUUIDPipe, Post, Body } 
 import { ApiTags } from '@nestjs/swagger';
 import { and, eq } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
+import { AuditEventsService } from '../../infrastructure/database/audit-events.service';
 import { businessLocations, inventoryBalances, stock, stockMovements, variants } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { Tenant } from '../auth/tenant.type';
@@ -10,7 +11,10 @@ import { AdjustStockDto } from './dto/adjust-stock.dto';
 @ApiTags('inventory')
 @Controller('api/v1/inventory')
 export class InventoryController {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly auditEvents: AuditEventsService = new AuditEventsService(),
+  ) {}
 
   @Get(':variantId')
   async get(@CurrentTenant() tenant: Tenant, @Param('variantId', ParseUUIDPipe) variantId: string) {
@@ -75,6 +79,15 @@ export class InventoryController {
           type: 'ADJUSTMENT',
           quantity: delta,
           note: body.note,
+        });
+        await this.auditEvents.appendInTransaction(tx, {
+          businessId: tenant.businessId,
+          actorUserId: tenant.userId,
+          locationId: location.id,
+          action: 'stock.adjusted',
+          resourceType: 'variant',
+          resourceId: variantId,
+          metadata: { previousQuantity, newQuantity: body.quantity, delta, note: body.note ?? null },
         });
       }
 
