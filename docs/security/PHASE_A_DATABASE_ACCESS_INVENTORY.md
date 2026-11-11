@@ -57,3 +57,16 @@ This is a deliberate compatibility exception, not a claim that these tables are 
 3. Review every SECURITY DEFINER function, owner, safe search path, EXECUTE ACL and any trigger dependencies.
 4. Review all FK relationships not backed by composite tenant keys; RLS policies must independently reject cross-tenant references where needed.
 5. Validate the inventory against the final branch HEAD and the rehearsal database after migration 0020.
+
+## Repository source scan
+
+A focused scan of all 42 `src/**/(controller|service|worker).ts` files found:
+- Two application-owned PostgreSQL pools: `DatabaseService` and the separate Better Auth pool in `src/auth/auth.ts`.
+- No additional `new Pool(...)` or direct `PoolClient` constructors in those 42 service/controller/worker files.
+- The only raw `PoolClient` API found in that scan is the optional `AuditEventsService.append(client, ...)` overload; the transaction-bound overload is preferred. A separate callsite scan remains required before deleting or certifying that overload.
+- Business controllers/services use `DatabaseService.db`; their safety depends on the global `TenantDatabaseInterceptor` wrapping authenticated tenant requests. The health endpoint performs only `SELECT 1` without a tenant.
+- Sync, finance, accounting, reporting, purchasing, sales, returns, inventory, loyalty and business services use the request-local `db` facade; they do not own separate pools.
+- The active `NotificationOutboxWorker` uses the privileged claim function only for cross-tenant queue reservation, then performs per-event reads and updates inside `TenantTransactionService.run`.
+- `NotificationDeliveryService` establishes its own tenant transaction before querying push devices or business metadata. `NotificationOutboxProcessor` remains unregistered and must not be enabled without its dedicated lifecycle/concurrency tests.
+
+This is a focused source scan, not a formal static proof: test utilities, migration scripts, CLI scripts, dependencies, and every raw SQL callsite still need a final pass.
