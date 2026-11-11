@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable } from '@nestjs/comm
 import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../../infrastructure/database/database';
+import { AuditEventsService } from '../../../infrastructure/database/audit-events.service';
 import { businesses, businessLocations, idempotencyKeys, inventoryBalances, purchaseItems, purchases, stock, stockMovements, suppliers, variants } from '../../../infrastructure/database/schema';
 import { Money, Quantity } from '../../../common/domain';
 import { hashRequestPayload } from '../../../common/idempotency/idempotency.util';
@@ -18,7 +19,10 @@ export interface ReceivePurchaseResult {
 
 @Injectable()
 export class ReceivePurchaseUseCase {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly auditEvents: AuditEventsService = new AuditEventsService(),
+  ) {}
 
   async execute(tenant: Tenant, dto: ReceivePurchaseDto, idempotencyKey: string | undefined): Promise<ReceivePurchaseResult> {
     const requestHash = hashRequestPayload(dto);
@@ -144,6 +148,16 @@ export class ReceivePurchaseUseCase {
           responseBody,
         });
       }
+
+      await this.auditEvents.appendInTransaction(tx, {
+        businessId: tenant.businessId,
+        actorUserId: tenant.userId,
+        locationId: location.id,
+        action: 'purchase.received',
+        resourceType: 'purchase',
+        resourceId: purchaseId,
+        metadata: { total: total.toDecimalString(), itemCount: itemRows.length, currency },
+      });
 
       return { body: responseBody, replayed: false };
     });
