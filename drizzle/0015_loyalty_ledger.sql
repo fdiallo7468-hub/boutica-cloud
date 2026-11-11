@@ -3,11 +3,15 @@ CREATE TABLE public.loyalty_configurations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
   enabled boolean NOT NULL DEFAULT false,
-  earn_points_per_1000 integer NOT NULL DEFAULT 1 CHECK (earn_points_per_1000 >= 0),
-  point_value numeric(14,4) NOT NULL DEFAULT 1 CHECK (point_value > 0),
-  minimum_redemption_points integer NOT NULL DEFAULT 100 CHECK (minimum_redemption_points >= 0),
-  expiry_days integer CHECK (expiry_days IS NULL OR expiry_days > 0),
+  earn_points_per_1000 integer NOT NULL DEFAULT 1,
+  point_value numeric(14,4) NOT NULL DEFAULT 1,
+  minimum_redemption_points integer NOT NULL DEFAULT 100,
+  expiry_days integer,
   CONSTRAINT loyalty_configurations_business_unique UNIQUE (business_id),
+  CONSTRAINT loyalty_configurations_earn_rate_non_negative CHECK (earn_points_per_1000 >= 0),
+  CONSTRAINT loyalty_configurations_point_value_positive CHECK (point_value > 0),
+  CONSTRAINT loyalty_configurations_minimum_non_negative CHECK (minimum_redemption_points >= 0),
+  CONSTRAINT loyalty_configurations_expiry_positive CHECK (expiry_days IS NULL OR expiry_days > 0),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -19,14 +23,16 @@ CREATE TABLE public.loyalty_ledger (
   business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE RESTRICT,
   customer_id uuid NOT NULL REFERENCES public.customers(id) ON DELETE RESTRICT,
   actor_user_id text,
-  points_delta integer NOT NULL CHECK (points_delta <> 0),
-  event_type text NOT NULL CHECK (event_type IN ('SALE_EARN','RETURN_REVERSAL','MANUAL_ADJUSTMENT')),
+  points_delta integer NOT NULL,
+  event_type text NOT NULL,
   source_id uuid NOT NULL,
   related_sale_id uuid REFERENCES public.sales(id) ON DELETE RESTRICT,
   idempotency_key text NOT NULL,
   note text,
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT loyalty_ledger_business_idempotency_unique UNIQUE (business_id, idempotency_key),
+  CONSTRAINT loyalty_ledger_non_zero_delta CHECK (points_delta <> 0),
+  CONSTRAINT loyalty_ledger_event_type_valid CHECK (event_type IN ('SALE_EARN','RETURN_REVERSAL','MANUAL_ADJUSTMENT')),
   CONSTRAINT loyalty_ledger_business_customer_fk FOREIGN KEY (business_id, customer_id) REFERENCES public.customers(business_id, id) ON DELETE RESTRICT
 );
 --> statement-breakpoint
