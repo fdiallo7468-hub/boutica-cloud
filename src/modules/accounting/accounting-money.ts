@@ -1,6 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
 
 export function accountingAmountToMinorUnits(value: string | number | undefined, field = 'amount'): bigint {
+  if (typeof value === 'number' && (!Number.isSafeInteger(value) || value < 0)) {
+    throw new BadRequestException(`${field} must be sent as a decimal string; numeric values must be safe non-negative integers`);
+  }
   const raw = value === undefined ? '0' : String(value);
   // Keep the decimal separator escaped once: this regex runs on the original string,
   // before any numeric conversion that could lose monetary precision.
@@ -10,6 +13,7 @@ export function accountingAmountToMinorUnits(value: string | number | undefined,
   const parts = raw.split('.');
   const whole = parts[0] ?? '0';
   const fraction = parts[1] ?? '';
+  if (whole.length > 16) throw new BadRequestException(`${field} exceeds NUMERIC(18,2) precision`);
   return BigInt(whole) * 100n + BigInt((fraction + '00').slice(0, 2));
 }
 
