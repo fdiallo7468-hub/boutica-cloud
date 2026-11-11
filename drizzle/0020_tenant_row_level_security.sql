@@ -358,6 +358,20 @@ CREATE POLICY boutica_loyalty_insert ON public.loyalty_ledger
 -- before a tenant context exists. The membership and business control-plane
 -- policies above are the boundary for tenant selection.
 
+-- The current application uses one PostgreSQL runtime identity for both
+-- Better Auth and tenant-scoped API requests. Keep identity tables outside
+-- tenant RLS, but grant the runtime role only the CRUD operations Better Auth
+-- needs. A future dedicated auth connection can narrow this boundary further.
+GRANT USAGE ON SCHEMA public TO boutica_runtime;
+--> statement-breakpoint
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
+  public.users,
+  public.accounts,
+  public.sessions,
+  public.verifications
+TO boutica_runtime;
+--> statement-breakpoint
+
 -- Remove broad CRUD from tenant data and grant only the required operations.
 REVOKE ALL ON TABLE
   public.accounting_accounts,
