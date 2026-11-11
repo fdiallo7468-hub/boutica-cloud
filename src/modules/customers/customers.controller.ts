@@ -37,7 +37,7 @@ export class CustomersController {
     if (includeArchived !== 'true') filters.push(eq(customers.isActive, true));
     const normalizedSearch = search?.trim();
     if (normalizedSearch) {
-      const pattern = `%${normalizedSearch.replace(/[\\%_]/g, '\\if (includeArchived !== 'true') filters.push(eq(customers.isActive, true));')}%`;
+      const pattern = `%${normalizedSearch}%`;
       filters.push(or(ilike(customers.name, pattern), ilike(customers.phone, pattern))!);
     }
 
