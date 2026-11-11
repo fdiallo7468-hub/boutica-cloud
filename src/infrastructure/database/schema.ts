@@ -442,6 +442,45 @@ export const saleItems = pgTable('sale_items', {
   quantityPositive: check('sale_items_quantity_positive', sql`${t.quantity} > 0`),
 }));
 
+export const loyaltyConfigurations = pgTable('loyalty_configurations', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+  enabled: boolean('enabled').notNull().default(false),
+  earnPointsPer1000: integer('earn_points_per_1000').notNull().default(1),
+  pointValue: numeric('point_value', { precision: 14, scale: 4 }).notNull().default('1'),
+  minimumRedemptionPoints: integer('minimum_redemption_points').notNull().default(100),
+  expiryDays: integer('expiry_days'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  businessUnique: uniqueIndex('loyalty_configurations_business_unique').on(t.businessId),
+  validEarnRate: check('loyalty_configurations_earn_rate_non_negative', sql`${t.earnPointsPer1000} >= 0`),
+  validPointValue: check('loyalty_configurations_point_value_positive', sql`${t.pointValue} > 0`),
+  validMinimum: check('loyalty_configurations_minimum_non_negative', sql`${t.minimumRedemptionPoints} >= 0`),
+  validExpiry: check('loyalty_configurations_expiry_positive', sql`${t.expiryDays} IS NULL OR ${t.expiryDays} > 0`),
+}));
+
+/** Append-only points ledger. Corrections are compensating entries, never updates. */
+export const loyaltyLedger = pgTable('loyalty_ledger', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'restrict' }),
+  customerId: uuid('customer_id').notNull().references(() => customers.id, { onDelete: 'restrict' }),
+  actorUserId: text('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
+  pointsDelta: integer('points_delta').notNull(),
+  eventType: text('event_type').notNull(),
+  sourceId: uuid('source_id').notNull(),
+  relatedSaleId: uuid('related_sale_id').references(() => sales.id, { onDelete: 'restrict' }),
+  idempotencyKey: text('idempotency_key').notNull(),
+  note: text('note'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  businessIdempotencyUnique: uniqueIndex('loyalty_ledger_business_idempotency_unique').on(t.businessId, t.idempotencyKey),
+  customerTimeIdx: index('loyalty_ledger_customer_time_idx').on(t.businessId, t.customerId, t.createdAt),
+  saleIdx: index('loyalty_ledger_sale_idx').on(t.businessId, t.relatedSaleId),
+  nonZeroDelta: check('loyalty_ledger_non_zero_delta', sql`${t.pointsDelta} <> 0`),
+  validEvent: check('loyalty_ledger_event_type_valid', sql`${t.eventType} IN ('SALE_EARN','RETURN_REVERSAL','MANUAL_ADJUSTMENT')`),
+}));
+
 export const expenses = pgTable('expenses', {
   id: uuid('id').defaultRandom().primaryKey(),
   businessId: uuid('business_id').notNull().references(() => businesses.id),
