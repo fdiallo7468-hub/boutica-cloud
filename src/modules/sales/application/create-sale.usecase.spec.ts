@@ -94,6 +94,7 @@ describe('CreateSaleUseCase notification events', () => {
       }),
     } as any;
     const mockAuditEventsService = {
+      append: jest.fn(),
       appendInTransaction: jest.fn().mockResolvedValue('audit-event-1'),
     };
     const useCase = new CreateSaleUseCase(database, mockOutboxService, undefined, mockAuditEventsService);
