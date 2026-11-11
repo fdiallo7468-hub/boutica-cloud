@@ -10,7 +10,7 @@
 -- request-scoped RLS implementation is introduced for every tenant table.
 ALTER TABLE public.businesses DISABLE ROW LEVEL SECURITY;
 --> statement-breakpoint
--- Trigger functions are owned by neondb_owner (the businesses table owner).
+-- Trigger functions execute with the database migration/table owner (the businesses table owner).
 -- SECURITY DEFINER lets atomic provisioning execute with that owner so the
 -- provisioning triggers can create business rows even when the invoking
 -- application role has no direct privileges on the businesses table.
