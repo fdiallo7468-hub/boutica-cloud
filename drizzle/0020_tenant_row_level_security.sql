@@ -55,7 +55,7 @@ CREATE OR REPLACE FUNCTION public.boutica_claim_notification_outbox(
   p_processing_status text,
   p_stale_before timestamptz
 )
-RETURNS SETOF public.notification_outbox
+RETURNS TABLE (id uuid, business_id uuid)
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, public, pg_temp
@@ -90,7 +90,7 @@ BEGIN
     locked_at = clock_timestamp()
   FROM candidates AS c
   WHERE o.id = c.id
-  RETURNING o.*;
+  RETURNING o.id, o.business_id;
 END;
 $$;
 --> statement-breakpoint
@@ -111,6 +111,11 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public, pg_temp
 AS $$
 BEGIN
+  IF p_business_id IS DISTINCT FROM public.boutica_current_business_id() THEN
+    RAISE EXCEPTION 'Notification outbox tenant context mismatch'
+      USING ERRCODE = '42501';
+  END IF;
+
   IF NOT (
     (p_expected_status = 'processing' AND p_status IN ('processing', 'pending', 'delivered'))
     OR
