@@ -39,6 +39,14 @@ function dateOnly(value: string): string {
   return value;
 }
 
+function validateDateRange(from?: string, to?: string): { from?: string; to?: string } {
+  const normalizedFrom = from === undefined ? undefined : dateOnly(from);
+  const normalizedTo = to === undefined ? undefined : dateOnly(to);
+  if (normalizedFrom && normalizedTo && normalizedFrom > normalizedTo) {
+    throw new BadRequestException('from must not be later than to');
+  }
+  return { from: normalizedFrom, to: normalizedTo };
+}
 
 @Injectable()
 export class AccountingLedgerService {
@@ -225,10 +233,13 @@ export class AccountingLedgerService {
   }
 
   async list(tenant: Tenant, filters: { from?: string; to?: string; periodId?: string; limit?: number } = {}) {
-    const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
+    const requestedLimit = filters.limit ?? 50;
+    if (!Number.isInteger(requestedLimit) || requestedLimit < 1) throw new BadRequestException('limit must be a positive integer');
+    const limit = Math.min(requestedLimit, 200);
+    const range = validateDateRange(filters.from, filters.to);
     const conditions = [eq(accountingEntries.businessId, tenant.businessId)];
-    if (filters.from) conditions.push(gte(accountingEntries.entryDate, dateOnly(filters.from)));
-    if (filters.to) conditions.push(lte(accountingEntries.entryDate, dateOnly(filters.to)));
+    if (range.from) conditions.push(gte(accountingEntries.entryDate, range.from));
+    if (range.to) conditions.push(lte(accountingEntries.entryDate, range.to));
     if (filters.periodId) conditions.push(eq(accountingEntries.periodId, filters.periodId));
     const entries = await this.database.db.select().from(accountingEntries)
       .where(and(...conditions)).orderBy(desc(accountingEntries.entryDate), desc(accountingEntries.entryNumber)).limit(limit);
@@ -236,12 +247,13 @@ export class AccountingLedgerService {
   }
 
   async ledger(tenant: Tenant, accountId: string, from?: string, to?: string) {
+    const range = validateDateRange(from, to);
     const conditions = [
       eq(accountingEntryLines.businessId, tenant.businessId),
       eq(accountingEntryLines.accountId, accountId),
     ];
-    if (from) conditions.push(gte(accountingEntries.entryDate, dateOnly(from)));
-    if (to) conditions.push(lte(accountingEntries.entryDate, dateOnly(to)));
+    if (range.from) conditions.push(gte(accountingEntries.entryDate, range.from));
+    if (range.to) conditions.push(lte(accountingEntries.entryDate, range.to));
     const rows = await this.database.db.select({
       entryId: accountingEntries.id,
       entryNumber: accountingEntries.entryNumber,
@@ -265,9 +277,10 @@ export class AccountingLedgerService {
   }
 
   async trialBalance(tenant: Tenant, from?: string, to?: string) {
+    const range = validateDateRange(from, to);
     const conditions = [eq(accountingEntries.businessId, tenant.businessId)];
-    if (from) conditions.push(gte(accountingEntries.entryDate, dateOnly(from)));
-    if (to) conditions.push(lte(accountingEntries.entryDate, dateOnly(to)));
+    if (range.from) conditions.push(gte(accountingEntries.entryDate, range.from));
+    if (range.to) conditions.push(lte(accountingEntries.entryDate, range.to));
     const rows = await this.database.db.select({
       accountId: accountingEntryLines.accountId,
       accountNumber: accountingAccounts.accountNumber,
@@ -286,7 +299,16 @@ export class AccountingLedgerService {
       .where(and(...conditions))
       .groupBy(accountingEntryLines.accountId, accountingAccounts.accountNumber, accountingAccounts.label)
       .orderBy(asc(accountingAccounts.accountNumber));
-    return rows;
+    const totalDebit = rows.reduce((sum, row) => sum + accountingAmountToMinorUnits(row.debit), 0n);
+    const totalCredit = rows.reduce((sum, row) => sum + accountingAmountToMinorUnits(row.credit), 0n);
+    return {
+      rows,
+      totals: {
+        debit: minorUnitsToAccountingAmount(totalDebit),
+        credit: minorUnitsToAccountingAmount(totalCredit),
+        balanced: totalDebit === totalCredit,
+      },
+    };
   }
 
   private async loadEntry(executor: any, businessId: string, entryId: string) {
