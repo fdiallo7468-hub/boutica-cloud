@@ -133,7 +133,7 @@ describe('Reports (e2e)', () => {
     expect(res.body.estimatedProfit).toBe('-48.00'); // 2.00 margin - 50.00 expenses
   });
 
-  it('keeps an old sale\\'s margin unchanged after the variant\\'s purchase price is updated later (v2.0 regression test)', async () => {
+  it('keeps an old sale\'s margin unchanged after the variant\'s purchase price is updated later (v2.0 regression test)', async () => {
     // Directly via Drizzle, not the API: there is currently no endpoint to
     // edit a variant's price after creation (flagged in AUDIT_REPORT.md
     // section H as a gap, not fixed here) — this is the only way to
