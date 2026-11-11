@@ -21,8 +21,8 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   readonly baseDb: NodePgDatabase<typeof schema>;
 
   /** Uses the request-local transaction when a verified tenant context exists. */
-  get db(): any {
-    return this.tenantDatabaseContext.current ?? this.baseDb;
+  get db(): NodePgDatabase<typeof schema> {
+    return (this.tenantDatabaseContext.current as NodePgDatabase<typeof schema> | undefined) ?? this.baseDb;
   }
 
   constructor(
