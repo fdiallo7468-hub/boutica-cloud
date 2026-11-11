@@ -446,10 +446,10 @@ GRANT SELECT, INSERT ON TABLE public.business_members TO boutica_runtime;
 --> statement-breakpoint
 GRANT SELECT, INSERT, UPDATE ON TABLE public.businesses TO boutica_runtime;
 --> statement-breakpoint
-ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
   REVOKE ALL ON TABLES FROM boutica_runtime;
 --> statement-breakpoint
-ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
   REVOKE ALL ON SEQUENCES FROM boutica_runtime;
 
 --> statement-breakpoint
@@ -668,9 +668,9 @@ GRANT SELECT (id) ON TABLE public.audit_events TO boutica_runtime;
 --> statement-breakpoint
 -- Keep future tables/sequences closed by default; each migration must grant
 -- the exact operations it needs.
-ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
   REVOKE ALL ON TABLES FROM boutica_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
   REVOKE ALL ON SEQUENCES FROM boutica_runtime;
 
 --> statement-breakpoint
