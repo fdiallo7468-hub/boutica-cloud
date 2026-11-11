@@ -25,6 +25,7 @@ The existing `GET /api/v1/reports/dashboard` and Excel/PDF exports are the start
 - Explicitly label estimates; do not call gross margin or profit accounting-grade until a proper ledger exists.
 
 ### Implemented increment
+- `GET /api/v1/customers/segments` groups active customers into deterministic new, active, at-risk, inactive and high-value segments; its thresholds are returned in the API response.
 - `GET /api/v1/customers?search=...` now supports tenant-scoped partial matching on customer name and phone while preserving pagination and archive filtering.
 - `GET /api/v1/customers/:id/summary` provides completed-sale count, lifetime value, average basket and last purchase, with cross-tenant 404 behavior.
 
