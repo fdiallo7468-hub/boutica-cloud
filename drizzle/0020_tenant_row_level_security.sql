@@ -665,3 +665,88 @@ ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
   REVOKE ALL ON TABLES FROM boutica_runtime;
 ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
   REVOKE ALL ON SEQUENCES FROM boutica_runtime;
+
+--> statement-breakpoint
+-- Remaining legacy references that are not represented by composite FKs.
+CREATE POLICY variants_product_same_tenant ON public.variants AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (EXISTS (
+    SELECT 1 FROM public.products p
+    WHERE p.id=variants.product_id AND p.business_id=variants.business_id
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.products p
+    WHERE p.id=variants.product_id AND p.business_id=variants.business_id
+  ));
+--> statement-breakpoint
+CREATE POLICY device_serial_sale_item_same_tenant ON public.device_serials AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (sale_item_id IS NULL OR EXISTS (
+    SELECT 1 FROM public.sale_items si
+    JOIN public.sales s ON s.id=si.sale_id
+    WHERE si.id=device_serials.sale_item_id
+      AND s.business_id=device_serials.business_id
+  ))
+  WITH CHECK (sale_item_id IS NULL OR EXISTS (
+    SELECT 1 FROM public.sale_items si
+    JOIN public.sales s ON s.id=si.sale_id
+    WHERE si.id=device_serials.sale_item_id
+      AND s.business_id=device_serials.business_id
+  ));
+--> statement-breakpoint
+CREATE POLICY payments_recorder_same_tenant ON public.payments AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (EXISTS (
+    SELECT 1 FROM public.business_members bm
+    WHERE bm.business_id=payments.business_id AND bm.user_id=payments.recorded_by
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.business_members bm
+    WHERE bm.business_id=payments.business_id AND bm.user_id=payments.recorded_by
+  ));
+--> statement-breakpoint
+CREATE POLICY payment_cancellations_actor_same_tenant ON public.payment_cancellations AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (EXISTS (
+    SELECT 1 FROM public.business_members bm
+    WHERE bm.business_id=payment_cancellations.business_id AND bm.user_id=payment_cancellations.cancelled_by
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.business_members bm
+    WHERE bm.business_id=payment_cancellations.business_id AND bm.user_id=payment_cancellations.cancelled_by
+  ));
+--> statement-breakpoint
+CREATE POLICY audit_actor_same_tenant ON public.audit_events AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (actor_user_id IS NULL OR EXISTS (
+    SELECT 1 FROM public.business_members bm
+    WHERE bm.business_id=audit_events.business_id AND bm.user_id=audit_events.actor_user_id
+  ))
+  WITH CHECK (actor_user_id IS NULL OR EXISTS (
+    SELECT 1 FROM public.business_members bm
+    WHERE bm.business_id=audit_events.business_id AND bm.user_id=audit_events.actor_user_id
+  ));
+--> statement-breakpoint
+CREATE POLICY loyalty_actor_same_tenant ON public.loyalty_ledger AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (actor_user_id IS NULL OR EXISTS (
+    SELECT 1 FROM public.business_members bm
+    WHERE bm.business_id=loyalty_ledger.business_id AND bm.user_id=loyalty_ledger.actor_user_id
+  ))
+  WITH CHECK (actor_user_id IS NULL OR EXISTS (
+    SELECT 1 FROM public.business_members bm
+    WHERE bm.business_id=loyalty_ledger.business_id AND bm.user_id=loyalty_ledger.actor_user_id
+  ));
+--> statement-breakpoint
+CREATE POLICY offline_operation_device_same_tenant ON public.offline_operations_log AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (EXISTS (
+    SELECT 1 FROM public.sync_devices d
+    WHERE d.business_id=offline_operations_log.business_id
+      AND d.device_id=offline_operations_log.device_id
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.sync_devices d
+    WHERE d.business_id=offline_operations_log.business_id
+      AND d.device_id=offline_operations_log.device_id
+  ));
