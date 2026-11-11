@@ -60,7 +60,15 @@ export class ReportsController {
       : this.db.db.select({ variantId: stock.variantId, quantity: stock.quantity, variantName: variants.name, sku: variants.sku })
           .from(stock).innerJoin(variants, eq(stock.variantId, variants.id))
           .where(and(eq(stock.businessId, businessId), lte(stock.quantity, query.lowStockThreshold))).orderBy(stock.quantity);
-    const bucket = sql<Date>`date_trunc(${query.granularity ?? 'day'}, ${sales.createdAt})`;
+    // Keep the date_trunc unit as a SQL literal from this allowlisted union.
+    // A bound parameter is emitted independently in SELECT/GROUP BY/ORDER BY;
+    // PostgreSQL then treats those placeholders as different expressions.
+    const granularity = query.granularity ?? 'day';
+    const bucket = granularity === 'week'
+      ? sql<Date>`date_trunc('week', ${sales.createdAt})`
+      : granularity === 'month'
+        ? sql<Date>`date_trunc('month', ${sales.createdAt})`
+        : sql<Date>`date_trunc('day', ${sales.createdAt})`;
 
     const [
       revenueRows,
