@@ -16,8 +16,8 @@ ALTER TABLE public.customers ADD CONSTRAINT customers_business_id_id_unique UNIQ
 CREATE TABLE public.loyalty_ledger (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE RESTRICT,
-  customer_id uuid NOT NULL,
-  actor_user_id text REFERENCES public.users(id) ON DELETE SET NULL,
+  customer_id uuid NOT NULL REFERENCES public.customers(id) ON DELETE RESTRICT,
+  actor_user_id text,
   points_delta integer NOT NULL CHECK (points_delta <> 0),
   event_type text NOT NULL CHECK (event_type IN ('SALE_EARN','RETURN_REVERSAL','MANUAL_ADJUSTMENT')),
   source_id uuid NOT NULL,
