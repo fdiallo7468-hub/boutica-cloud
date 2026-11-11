@@ -106,3 +106,32 @@ CREATE TRIGGER accounting_entries_append_only
 CREATE TRIGGER accounting_entry_lines_append_only
   BEFORE INSERT OR UPDATE OR DELETE ON public.accounting_entry_lines
   FOR EACH ROW EXECUTE FUNCTION public.reject_posted_accounting_entry_mutation();
+
+-- Enforce balanced, non-empty entries at the database transaction boundary.
+CREATE FUNCTION public.assert_posted_accounting_entry_balanced() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE current_status text;
+DECLARE line_count integer;
+DECLARE debit_total numeric(24,2);
+DECLARE credit_total numeric(24,2);
+BEGIN
+  SELECT status INTO current_status
+  FROM public.accounting_entries
+  WHERE business_id = NEW.business_id AND id = NEW.id;
+  IF current_status IS DISTINCT FROM 'POSTED' THEN
+    RETURN NULL;
+  END IF;
+  SELECT count(*), COALESCE(sum(debit), 0), COALESCE(sum(credit), 0)
+    INTO line_count, debit_total, credit_total
+  FROM public.accounting_entry_lines
+  WHERE business_id = NEW.business_id AND entry_id = NEW.id;
+  IF line_count < 2 OR debit_total <= 0 OR debit_total <> credit_total THEN
+    RAISE EXCEPTION 'Posted accounting entry must have at least two lines and balanced positive debit/credit totals';
+  END IF;
+  RETURN NULL;
+END;
+$$;
+CREATE CONSTRAINT TRIGGER accounting_entries_must_balance
+  AFTER INSERT OR UPDATE OF status ON public.accounting_entries
+  DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION public.assert_posted_accounting_entry_balanced();
