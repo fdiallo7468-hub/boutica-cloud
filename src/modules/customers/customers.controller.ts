@@ -12,7 +12,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { and, count, eq, sql } from 'drizzle-orm';
+import { and, count, eq, ilike, or, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
 import { customers, sales } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
@@ -31,9 +31,15 @@ export class CustomersController {
     @CurrentTenant() tenant: Tenant,
     @Query() query: PaginationQueryDto,
     @Query('includeArchived') includeArchived?: string,
+    @Query('search') search?: string,
   ) {
     const filters = [eq(customers.businessId, tenant.businessId)];
     if (includeArchived !== 'true') filters.push(eq(customers.isActive, true));
+    const normalizedSearch = search?.trim();
+    if (normalizedSearch) {
+      const pattern = `%${normalizedSearch.replace(/[\\%_]/g, '\\if (includeArchived !== 'true') filters.push(eq(customers.isActive, true));')}%`;
+      filters.push(or(ilike(customers.name, pattern), ilike(customers.phone, pattern))!);
+    }
 
     const [data, countResult] = await Promise.all([
       this.db.db.select().from(customers).where(and(...filters)).limit(query.limit).offset(query.offset),
