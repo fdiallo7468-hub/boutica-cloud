@@ -14,7 +14,7 @@ import {
 import { ApiTags } from '@nestjs/swagger';
 import { and, count, eq, ilike, or, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
-import { businessLocations, customers, sales } from '../../infrastructure/database/schema';
+import { businessLocations, customers, returns, sales } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { Tenant } from '../auth/tenant.type';
 import { PaginationQueryDto } from '../../common/pagination.dto';
@@ -101,8 +101,7 @@ export class CustomersController {
     const [metrics] = await this.db.db
       .select({
         completedSalesCount: count(),
-        lifetimeValue: sql<string>`coalesce(sum(${sales.total}), 0)::text`,
-        averageBasket: sql<string>`coalesce(round(avg(${sales.total}), 2), 0)::text`,
+        grossLifetimeValue: sql<string>`coalesce(sum(${sales.total}), 0)::text`,
         lastPurchaseAt: sql<Date | null>`max(${sales.createdAt})`,
       })
       .from(sales)
@@ -112,11 +111,22 @@ export class CustomersController {
         eq(sales.status, 'COMPLETED'),
       ));
 
+    const [returned] = await this.db.db.select({
+      total: sql<string>`coalesce(sum(${returns.total}), 0)::text`,
+    }).from(returns).innerJoin(sales, eq(returns.saleId, sales.id)).where(and(
+      eq(returns.businessId, tenant.businessId), eq(sales.customerId, id), eq(returns.status, 'COMPLETED'),
+    ));
+    const countValue = metrics?.completedSalesCount ?? 0;
+    const grossValue = Number(metrics?.grossLifetimeValue ?? 0);
+    const returnedValue = Number(returned?.total ?? 0);
+    const netLifetime = grossValue - returnedValue;
     return {
       customerId: customer.id,
-      completedSalesCount: metrics?.completedSalesCount ?? 0,
-      lifetimeValue: metrics?.lifetimeValue ?? '0',
-      averageBasket: metrics?.averageBasket ?? '0',
+      completedSalesCount: countValue,
+      grossLifetimeValue: grossValue.toFixed(2),
+      returnedValue: returnedValue.toFixed(2),
+      lifetimeValue: netLifetime.toFixed(2),
+      averageBasket: (countValue > 0 ? netLifetime / countValue : 0).toFixed(2),
       lastPurchaseAt: metrics?.lastPurchaseAt ?? null,
     };
   }
@@ -142,21 +152,29 @@ export class CustomersController {
       .where(and(eq(customers.businessId, tenant.businessId), eq(customers.isActive, true)))
       .groupBy(customers.id);
 
+    const returnedRows = await this.db.db.select({
+      customerId: sales.customerId,
+      returnedValue: sql<string>`coalesce(sum(${returns.total}), 0)::text`,
+    }).from(returns).innerJoin(sales, eq(returns.saleId, sales.id)).where(and(
+      eq(returns.businessId, tenant.businessId), eq(returns.status, 'COMPLETED'), eq(sales.status, 'COMPLETED'),
+    )).groupBy(sales.customerId);
+    const returnedByCustomer = new Map(returnedRows.map(row => [row.customerId, Number(row.returnedValue)]));
     const now = Date.now();
     const day = 24 * 60 * 60 * 1000;
     const segments = { new: [] as typeof rows, active: [] as typeof rows, atRisk: [] as typeof rows, inactive: [] as typeof rows, highValue: [] as typeof rows };
     for (const row of rows) {
+      const adjustedRow = { ...row, lifetimeValue: (Number(row.lifetimeValue) - (returnedByCustomer.get(row.customerId) ?? 0)).toFixed(2) };
       const lastPurchase = row.lastPurchaseAt ? new Date(row.lastPurchaseAt).getTime() : null;
       const daysSincePurchase = lastPurchase === null ? null : Math.floor((now - lastPurchase) / day);
-      if (Number(row.lifetimeValue) >= 250000) segments.highValue.push(row);
+      if (Number(adjustedRow.lifetimeValue) >= 250000) segments.highValue.push(adjustedRow);
       if (daysSincePurchase === null && now - new Date(row.createdAt).getTime() <= 30 * day) {
-        segments.new.push(row);
+        segments.new.push(adjustedRow);
       } else if (daysSincePurchase === null || daysSincePurchase > 90) {
-        segments.inactive.push(row);
+        segments.inactive.push(adjustedRow);
       } else if (daysSincePurchase > 30) {
-        segments.atRisk.push(row);
+        segments.atRisk.push(adjustedRow);
       } else {
-        segments.active.push(row);
+        segments.active.push(adjustedRow);
       }
     }
 
