@@ -237,6 +237,9 @@ export class ReportsController {
 
   private async validateExportLocation(businessId: string, locationId?: string) {
     if (!locationId) return;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(locationId)) {
+      throw new BadRequestException('Invalid location ID');
+    }
     const [location] = await this.db.db.select({ id: businessLocations.id }).from(businessLocations).where(and(
       eq(businessLocations.id, locationId), eq(businessLocations.businessId, businessId), eq(businessLocations.isActive, true),
     ));
