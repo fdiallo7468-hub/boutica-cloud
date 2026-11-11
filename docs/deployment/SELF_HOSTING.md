@@ -81,7 +81,7 @@ openssl rand -base64 48
 
 - **Arcjet:** currently mandatory in production. The production API refuses to start without an operator-provided key.
 - **Cloudinary:** currently the implemented durable media provider and mandatory in production. Media upload/download routes depend on it.
-- **Resend:** optional; required only if password-reset email delivery is enabled.
+- **Resend:** optional; required only if password-reset email delivery is enabled. When enabled, set `EMAIL_FROM` to a sender address on a domain verified in the buyer's own Resend account; the example address is only a placeholder.
 - **Novu:** optional; used only when the operator configures its API key and workflow identifiers. Without it, the existing Expo delivery path is used.
 - **Expo Push:** used by the direct push-notification path when Novu is not configured.
 
