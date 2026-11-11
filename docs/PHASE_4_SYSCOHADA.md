@@ -34,6 +34,24 @@ Hors périmètre : Business Assistant, Data Warehouse, ML/DL, prévisions, fisca
 - Tests unitaires, tests PostgreSQL d'intégration, lint et build de production passent sur le SHA final de la PR.
 - Les règles, comptes et états réglementaires sont comparés à des sources officielles et validés par un professionnel SYSCOHADA avant toute revendication de conformité.
 
+## Phase 4.1 — fondations API
+
+Le premier incrément expose le profil comptable, le référentiel de comptes (saisie contrôlée, sans import d'un plan officiel non vérifié), les exercices et les journaux. Le complément API ajoute :
+
+- Gestion des périodes comptables : liste, création rattachée à un exercice, vérification d'inclusion dans les dates de l'exercice et prévention transactionnelle des chevauchements par verrou consultatif PostgreSQL au niveau de l'entreprise.
+- Transitions de période uniquement vers **CLOSED** ou **LOCKED** ; une période verrouillée est terminale et une période fermée ne peut qu'être verrouillée.
+- Mise à jour limitée des comptes (libellé, sens normal, caractère imputable, activation), sans changement d'identifiant ni de rattachement hiérarchique.
+- Mise à jour limitée des journaux (libellé, préfixe de séquence, activation), sans réinitialiser le compteur de séquence ni changer le type/code.
+
+Routes ajoutées :
+- `GET /api/v1/accounting/periods`
+- `POST /api/v1/accounting/periods`
+- `PATCH /api/v1/accounting/periods/:periodId/status`
+- `PATCH /api/v1/accounting/accounts/:accountId`
+- `PATCH /api/v1/accounting/journals/:journalId`
+
+Les contrôles de chevauchement des exercices fiscaux, de hiérarchie des comptes et les transitions de périodes devront être couverts par des tests PostgreSQL dédiés avant de considérer 4.1 comme entièrement close.
+
 ## Phase 4.1 — premier schéma
 
 Migration `0016_syscohada_accounting_foundation.sql` : profil comptable, comptes, exercices, périodes et journaux. Les données de référence du plan comptable ne sont pas encore préchargées ; elles doivent provenir d'un référentiel officiel vérifié, pas d'une liste improvisée.
