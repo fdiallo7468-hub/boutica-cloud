@@ -294,7 +294,8 @@ export class AccountingController {
     @Param('periodId') periodId: string,
     @Body() body: { status?: unknown },
   ) {
-    if (body.status !== 'CLOSED' && body.status !== 'LOCKED') {
+    const targetStatus = body.status;
+    if (targetStatus !== 'CLOSED' && targetStatus !== 'LOCKED') {
       throw new BadRequestException('status must be CLOSED or LOCKED');
     }
     return this.database.db.transaction(async (tx) => {
@@ -308,7 +309,7 @@ export class AccountingController {
         throw new ConflictException('A closed accounting period can only be locked');
       }
       const [updated] = await tx.update(accountingPeriods).set({
-        status: body.status, closedAt: period.closedAt ?? new Date(), updatedAt: new Date(),
+        status: targetStatus, closedAt: period.closedAt ?? new Date(), updatedAt: new Date(),
       }).where(and(eq(accountingPeriods.id, periodId), eq(accountingPeriods.businessId, tenant.businessId)))
         .returning();
       return updated;
