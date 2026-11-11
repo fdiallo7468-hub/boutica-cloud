@@ -1,7 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { bearer } from "better-auth/plugins";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { envSchema } from "../config/env.schema";
@@ -35,16 +35,27 @@ const db = drizzle(pool, { schema: { users, sessions, accounts, verifications, b
  * grant privileges after a membership change.
  */
 export async function resolveTenantMembership(userId: string, businessId: string) {
-  const [membership] = await db
-    .select({ role: businessMembers.role })
-    .from(businessMembers)
-    .where(and(
-      eq(businessMembers.userId, userId),
-      eq(businessMembers.businessId, businessId),
-    ))
-    .limit(1);
+  // Membership is resolved before the main HTTP tenant transaction exists.
+  // Establish a short-lived, transaction-local identity so the same lookup
+  // remains compatible with a future RLS policy on business_members.
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`
+      SELECT
+        set_config('app.business_id', ${businessId}, true),
+        set_config('app.actor_user_id', ${userId}, true)
+    `);
 
-  return membership ?? null;
+    const [membership] = await tx
+      .select({ role: businessMembers.role })
+      .from(businessMembers)
+      .where(and(
+        eq(businessMembers.userId, userId),
+        eq(businessMembers.businessId, businessId),
+      ))
+      .limit(1);
+
+    return membership ?? null;
+  });
 }
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => {
