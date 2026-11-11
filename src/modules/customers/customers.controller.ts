@@ -114,7 +114,7 @@ export class CustomersController {
     const [returned] = await this.db.db.select({
       total: sql<string>`coalesce(sum(${returns.total}), 0)::text`,
     }).from(returns).innerJoin(sales, eq(returns.saleId, sales.id)).where(and(
-      eq(returns.businessId, tenant.businessId), eq(sales.customerId, id), eq(returns.status, 'COMPLETED'),
+      eq(returns.businessId, tenant.businessId), eq(sales.businessId, tenant.businessId), eq(sales.customerId, id), eq(returns.status, 'COMPLETED'),
     ));
     const countValue = metrics?.completedSalesCount ?? 0;
     const grossValue = Number(metrics?.grossLifetimeValue ?? 0);
@@ -156,7 +156,7 @@ export class CustomersController {
       customerId: sales.customerId,
       returnedValue: sql<string>`coalesce(sum(${returns.total}), 0)::text`,
     }).from(returns).innerJoin(sales, eq(returns.saleId, sales.id)).where(and(
-      eq(returns.businessId, tenant.businessId), eq(returns.status, 'COMPLETED'), eq(sales.status, 'COMPLETED'),
+      eq(returns.businessId, tenant.businessId), eq(sales.businessId, tenant.businessId), eq(returns.status, 'COMPLETED'), eq(sales.status, 'COMPLETED'),
     )).groupBy(sales.customerId);
     const returnedByCustomer = new Map(returnedRows.map(row => [row.customerId, Number(row.returnedValue)]));
     const now = Date.now();
