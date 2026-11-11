@@ -80,6 +80,58 @@ export class CustomersController {
     };
   }
 
+  @Get('segments')
+  async segments(@CurrentTenant() tenant: Tenant) {
+    const rows = await this.db.db
+      .select({
+        customerId: customers.id,
+        name: customers.name,
+        phone: customers.phone,
+        createdAt: customers.createdAt,
+        completedSalesCount: count(sales.id),
+        lifetimeValue: sql<string>`coalesce(sum(${sales.total}), 0)::text`,
+        lastPurchaseAt: sql<Date | null>`max(${sales.createdAt})`,
+      })
+      .from(customers)
+      .leftJoin(sales, and(
+        eq(sales.customerId, customers.id),
+        eq(sales.businessId, tenant.businessId),
+        eq(sales.status, 'COMPLETED'),
+      ))
+      .where(and(eq(customers.businessId, tenant.businessId), eq(customers.isActive, true)))
+      .groupBy(customers.id);
+
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const segments = { new: [] as typeof rows, active: [] as typeof rows, atRisk: [] as typeof rows, inactive: [] as typeof rows, highValue: [] as typeof rows };
+    for (const row of rows) {
+      const lastPurchase = row.lastPurchaseAt ? new Date(row.lastPurchaseAt).getTime() : null;
+      const daysSincePurchase = lastPurchase === null ? null : Math.floor((now - lastPurchase) / day);
+      if (Number(row.lifetimeValue) >= 250000) segments.highValue.push(row);
+      if (daysSincePurchase === null && now - new Date(row.createdAt).getTime() <= 30 * day) {
+        segments.new.push(row);
+      } else if (daysSincePurchase === null || daysSincePurchase > 90) {
+        segments.inactive.push(row);
+      } else if (daysSincePurchase > 30) {
+        segments.atRisk.push(row);
+      } else {
+        segments.active.push(row);
+      }
+    }
+
+    return {
+      rules: { newCustomerDays: 30, activePurchaseDays: 30, atRiskAfterDays: 30, inactiveAfterDays: 90, highValueLifetimeSpend: '250000.00' },
+      counts: {
+        new: segments.new.length,
+        active: segments.active.length,
+        atRisk: segments.atRisk.length,
+        inactive: segments.inactive.length,
+        highValue: segments.highValue.length,
+      },
+      customers: segments,
+    };
+  }
+
   @Get(':id')
   async get(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) id: string) {
     const [customer] = await this.db.db
