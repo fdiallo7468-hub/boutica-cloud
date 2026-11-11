@@ -66,6 +66,7 @@ export class ReportsController {
       revenueRows,
       expensesRows,
       grossMarginRows,
+      discountRows,
       stockValueRows,
       recentSales,
       topProducts,
@@ -91,6 +92,7 @@ export class ReportsController {
         .innerJoin(sales, eq(saleItems.saleId, sales.id))
         .innerJoin(variants, eq(saleItems.variantId, variants.id))
         .where(completedSalesInRange),
+      this.db.db.select({ discountTotal: sql<string>`coalesce(sum(${sales.discount}), 0)::text` }).from(sales).where(completedSalesInRange),
       stockValueQuery,
       this.db.db
         .select({ id: sales.id, total: sales.total, customerId: sales.customerId, createdAt: sales.createdAt })
@@ -127,13 +129,13 @@ export class ReportsController {
         .from(sales).where(completedSalesInRange),
       this.db.db.select({ revenue: sql<string>`coalesce(sum(${sales.total}), 0)::text` })
         .from(sales).where(and(eq(sales.businessId, businessId), eq(sales.status, 'COMPLETED'), gte(sales.createdAt, previousFrom), lte(sales.createdAt, previousTo), ...(query.locationId ? [eq(sales.locationId, query.locationId)] : []))),
-      this.db.db.select({ bucket, revenue: sql<string>`coalesce(sum(${sales.total}), 0)::text`, completedSalesCount: count() })
+      this.db.db.select({ bucket, revenue: sql<string>`coalesce(sum(${sales.total}), 0)::text`, completedSalesCount: count(), averageBasket: sql<string>`coalesce(round(avg(${sales.total}), 2), 0)::text` })
         .from(sales).where(completedSalesInRange).groupBy(bucket).orderBy(bucket),
     ]);
 
     const revenue = revenueRows[0]?.revenue ?? '0.00';
     const expensesTotal = expensesRows[0]?.expensesTotal ?? '0.00';
-    const grossMargin = grossMarginRows[0]?.grossMargin ?? '0.00';
+    const grossMargin = (Number(grossMarginRows[0]?.grossMargin ?? 0) - Number(discountRows[0]?.discountTotal ?? 0)).toFixed(2);
     const stockValue = stockValueRows[0]?.stockValue ?? '0.00';
     const receivablesSummary = receivablesRows[0] ?? { totalOutstanding: '0.00', overdueAmount: '0.00', count: 0 };
 
@@ -144,7 +146,10 @@ export class ReportsController {
       averageBasket: salesKpis[0]?.averageBasket ?? '0.00',
       previousPeriod: { from: previousFrom.toISOString(), to: previousTo.toISOString(), revenue: previousRevenueRows[0]?.revenue ?? '0.00' },
       expensesTotal,
+      discountsTotal: discountRows[0]?.discountTotal ?? '0.00',
+      grossMarginEstimate: grossMargin,
       estimatedProfit: ((toMinorUnits(grossMargin) - toMinorUnits(expensesTotal)) / 100).toFixed(2),
+      estimatedProfitIsEstimate: true,
       stockValue,
       receivables: {
         totalOutstanding: receivablesSummary.totalOutstanding,
