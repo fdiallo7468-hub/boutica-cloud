@@ -55,3 +55,43 @@ Les contrôles de chevauchement des exercices fiscaux, de hiérarchie des compte
 ## Phase 4.1 — premier schéma
 
 Migration `0016_syscohada_accounting_foundation.sql` : profil comptable, comptes, exercices, périodes et journaux. Les données de référence du plan comptable ne sont pas encore préchargées ; elles doivent provenir d'un référentiel officiel vérifié, pas d'une liste improvisée.
+
+## Avancement des phases 4.2 à 4.4
+
+### 4.2 — moteur comptable : premier incrément implémenté
+
+Migration `0017_accounting_entries_ledger.sql` :
+- En-tête d'écriture rattaché à un journal et à une période de la même entreprise.
+- Lignes avec références composites vers les comptes de la même entreprise.
+- Montants `NUMERIC(18,2)`, une seule colonne débit ou crédit strictement positive par ligne.
+- Numéro unique par entreprise, clé d'idempotence, référence source et lien d'extourne.
+- Déclencheurs PostgreSQL empêchant la modification ou suppression d'une écriture comptabilisée et l'ajout/modification/suppression de ses lignes après validation. La création se fait en état DRAFT dans la transaction, puis passe à POSTED après insertion des lignes.
+- Validation applicative de l'équilibre débit/crédit, de l'imputabilité et de l'activation des comptes, du journal actif et de la période ouverte.
+- Extourne par nouvelle écriture inverse, dans une période ouverte explicitement sélectionnée.
+
+Routes :
+- `POST /api/v1/accounting/entries`
+- `GET /api/v1/accounting/entries`
+- `POST /api/v1/accounting/entries/:entryId/reverse`
+
+### 4.3 — intégrations opérationnelles : à terminer
+
+Les points d'intégration identifiés sont les ventes, réceptions d'achats, paiements confirmés/annulés, dépenses, retours et ajustements de stock. Leur comptabilisation automatique nécessite un paramétrage explicite des comptes de contrepartie (par exemple caisse/banque, clients, fournisseurs, ventes, achats/stocks, charges et variation de stock/COGS), puis des règles déterministes par type d'événement.
+
+Aucune écriture automatique ne doit être émise avec des comptes supposés. Les adaptateurs transactionnels et le registre idempotent des événements sources restent à implémenter ; tant que ce travail n'est pas achevé, 4.3 n'est pas considérée comme acceptée.
+
+### 4.4 — grand livre et balance : premier incrément implémenté
+
+- Consultation des écritures avec filtres de période/date.
+- Grand livre par compte avec cumul débit, crédit et solde courant.
+- Balance générale agrégée par compte, avec totaux débit et crédit.
+
+Routes :
+- `GET /api/v1/accounting/accounts/:accountId/ledger`
+- `GET /api/v1/accounting/trial-balance`
+
+La balance et le grand livre doivent encore recevoir des tests de réconciliation PostgreSQL dédiés. Les auxiliaires clients/fournisseurs et les soldes d'ouverture restent à compléter avant l'acceptation finale de 4.4.
+
+## État de validation
+
+Le développement de ces incréments n'équivaut pas à une acceptation fonctionnelle complète. Le statut CI doit être vérifié sur le dernier SHA de la PR après chaque série de commits. Aucune conformité SYSCOHADA réglementaire n'est revendiquée à ce stade.
