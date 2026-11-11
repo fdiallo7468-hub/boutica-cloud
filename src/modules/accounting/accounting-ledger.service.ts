@@ -112,7 +112,7 @@ export class AccountingLedgerService {
       const [period] = await tx.select().from(accountingPeriods).where(and(
         eq(accountingPeriods.id, input.periodId),
         eq(accountingPeriods.businessId, tenant.businessId),
-      )).limit(1);
+      )).for('update').limit(1);
       if (!period) throw new NotFoundException('Accounting period not found');
       if (period.status !== 'OPEN') throw new ConflictException('Accounting period is not open');
       if (entryDate < period.startDate || entryDate > period.endDate) {
@@ -179,7 +179,7 @@ export class AccountingLedgerService {
       const [original] = await tx.select().from(accountingEntries).where(and(
         eq(accountingEntries.id, entryId),
         eq(accountingEntries.businessId, tenant.businessId),
-      )).limit(1);
+      )).for('update').limit(1);
       if (!original) throw new NotFoundException('Accounting entry not found');
       const entryDate = dateOnly(reversalDate);
       const [period] = await tx.select().from(accountingPeriods).where(and(
