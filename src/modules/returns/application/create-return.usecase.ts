@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../../infrastructure/database/database';
+import { AuditEventsService } from '../../../infrastructure/database/audit-events.service';
 import {
   businesses,
   inventoryBalances,
@@ -29,7 +30,11 @@ export interface CreateReturnResult {
 
 @Injectable()
 export class CreateReturnUseCase {
-  constructor(private readonly db: DatabaseService, private readonly loyaltyLedger: LoyaltyLedgerService = new LoyaltyLedgerService()) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly loyaltyLedger: LoyaltyLedgerService = new LoyaltyLedgerService(),
+    private readonly auditEvents: AuditEventsService = new AuditEventsService(),
+  ) {}
 
   async execute(tenant: Tenant, dto: CreateReturnDto, idempotencyKey: string | undefined): Promise<CreateReturnResult> {
     const requestHash = hashRequestPayload(dto);
@@ -185,6 +190,16 @@ export class CreateReturnUseCase {
           responseBody,
         });
       }
+
+      await this.auditEvents.appendInTransaction(tx, {
+        businessId: tenant.businessId,
+        actorUserId: tenant.userId,
+        locationId: sale.locationId,
+        action: 'return.completed',
+        resourceType: 'return',
+        resourceId: returnId,
+        metadata: { saleId: sale.id, total: total.toDecimalString(), itemCount: itemRows.length, currency },
+      });
 
       return { body: responseBody, replayed: false };
     });
