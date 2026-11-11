@@ -54,7 +54,6 @@ jobs:
 
       - name: Create database roles used by RLS verification
         run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE ROLE neondb_owner NOLOGIN NOSUPERUSER NOBYPASSRLS;"
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE ROLE boutica_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;"
 
       - name: Apply database migrations
