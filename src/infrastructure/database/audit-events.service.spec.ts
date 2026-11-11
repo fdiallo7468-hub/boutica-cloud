@@ -24,6 +24,32 @@ describe("AuditEventsService", () => {
     );
   });
 
+  it("appends through a Drizzle transaction and returns the inserted id", async () => {
+    const transaction = { execute: jest.fn().mockResolvedValue({ rows: [{ id: "event-2" }] }) };
+    const id = await service.appendInTransaction(transaction, {
+      businessId: "business-1",
+      actorUserId: "user-1",
+      locationId: "location-1",
+      action: "payment.recorded",
+      resourceType: "payment",
+      resourceId: "payment-1",
+      metadata: { amount: "12500.00" },
+    });
+    expect(id).toBe("event-2");
+    expect(transaction.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects invalid metadata before writing through a transaction", async () => {
+    const transaction = { execute: jest.fn() };
+    await expect(service.appendInTransaction(transaction, {
+      businessId: "business-1",
+      action: "sale.created",
+      resourceType: "sale",
+      metadata: [] as unknown as Record<string, unknown>,
+    })).rejects.toThrow("JSON object");
+    expect(transaction.execute).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid metadata before writing", async () => {
     await expect(service.append(client, {
       businessId: "business-1",
