@@ -868,3 +868,62 @@ export const accountingJournals = pgTable(
     }),
   }),
 );
+
+export const accountingEntries = pgTable(
+  'accounting_entries',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'restrict' }),
+    journalId: uuid('journal_id').notNull(),
+    periodId: uuid('period_id').notNull(),
+    entryNumber: text('entry_number').notNull(),
+    entryDate: date('entry_date').notNull(),
+    description: text('description').notNull(),
+    status: text('status').notNull().default('POSTED'),
+    sourceType: text('source_type'),
+    sourceId: text('source_id'),
+    idempotencyKey: text('idempotency_key'),
+    reversalOfEntryId: uuid('reversal_of_entry_id'),
+    postedAt: timestamp('posted_at', { withTimezone: true }).defaultNow().notNull(),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessIdIdUnique: uniqueIndex('accounting_entries_business_id_id_unique').on(t.businessId, t.id),
+    businessNumberUnique: uniqueIndex('accounting_entries_business_number_unique').on(t.businessId, t.entryNumber),
+    sourceUnique: uniqueIndex('accounting_entries_source_unique').on(t.businessId, t.sourceType, t.sourceId),
+    idempotencyUnique: uniqueIndex('accounting_entries_idempotency_unique').on(t.businessId, t.idempotencyKey),
+    reversalUnique: uniqueIndex('accounting_entries_single_reversal_unique').on(t.businessId, t.reversalOfEntryId),
+    businessDateIdx: index('accounting_entries_business_date_idx').on(t.businessId, t.entryDate, t.id),
+    businessPeriodIdx: index('accounting_entries_business_period_idx').on(t.businessId, t.periodId, t.entryDate),
+    journalFk: foreignKey({ name: 'accounting_entries_journal_fk', columns: [t.businessId, t.journalId], foreignColumns: [accountingJournals.businessId, accountingJournals.id] }),
+    periodFk: foreignKey({ name: 'accounting_entries_period_fk', columns: [t.businessId, t.periodId], foreignColumns: [accountingPeriods.businessId, accountingPeriods.id] }),
+    reversalFk: foreignKey({ name: 'accounting_entries_reversal_fk', columns: [t.businessId, t.reversalOfEntryId], foreignColumns: [t.businessId, t.id] }),
+    statusCheck: check('accounting_entries_status_check', sql`${t.status} = 'POSTED'`),
+    sourcePairCheck: check('accounting_entries_source_pair_check', sql`(${t.sourceType} IS NULL) = (${t.sourceId} IS NULL)`),
+    descriptionCheck: check('accounting_entries_description_check', sql`length(btrim(${t.description})) BETWEEN 2 AND 240`),
+  }),
+);
+
+export const accountingEntryLines = pgTable(
+  'accounting_entry_lines',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull(),
+    entryId: uuid('entry_id').notNull(),
+    lineNumber: integer('line_number').notNull(),
+    accountId: uuid('account_id').notNull(),
+    description: text('description'),
+    debit: numeric('debit', { precision: 18, scale: 2 }).notNull().default('0'),
+    credit: numeric('credit', { precision: 18, scale: 2 }).notNull().default('0'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    entryLineUnique: uniqueIndex('accounting_entry_lines_entry_line_unique').on(t.entryId, t.lineNumber),
+    businessAccountIdx: index('accounting_entry_lines_business_account_idx').on(t.businessId, t.accountId, t.entryId),
+    entryFk: foreignKey({ name: 'accounting_entry_lines_entry_fk', columns: [t.businessId, t.entryId], foreignColumns: [accountingEntries.businessId, accountingEntries.id] }),
+    accountFk: foreignKey({ name: 'accounting_entry_lines_account_fk', columns: [t.businessId, t.accountId], foreignColumns: [accountingAccounts.businessId, accountingAccounts.id] }),
+    lineNumberCheck: check('accounting_entry_lines_line_number_check', sql`${t.lineNumber} > 0`),
+    amountsCheck: check('accounting_entry_lines_amounts_check', sql`${t.debit} >= 0 AND ${t.credit} >= 0 AND ((${t.debit} > 0 AND ${t.credit} = 0) OR (${t.credit} > 0 AND ${t.debit} = 0))`),
+  }),
+);
