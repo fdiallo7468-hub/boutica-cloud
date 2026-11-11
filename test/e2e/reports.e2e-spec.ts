@@ -50,6 +50,8 @@ describe('Reports (e2e)', () => {
     expect(res.body.topProducts).toHaveLength(1);
     expect(res.body.topProducts[0]).toMatchObject({ variantId, quantitySold: 4 });
     expect(res.body.lowStockAlerts).toEqual([]); // 16 left, default threshold is 5
+    expect(res.body.timeSeries).toHaveLength(1);
+    expect(res.body.timeSeries[0]).toMatchObject({ revenue: '100.00', completedSalesCount: 1 });
   });
 
   it('flags a variant as low stock once it drops to or below the threshold', async () => {
