@@ -8,7 +8,12 @@
 
 Give business owners and managers a reliable view of business performance and tools to retain and understand customers. Extend the existing NestJS modular monolith; do not introduce microservices or replace working v2.1 contracts.
 
-## Workstream A — Business intelligence\n\n### Implemented increment\n- Dashboard now exposes completed sales count and average basket for the selected date window.\n- Dashboard includes revenue for the immediately preceding equal-duration period.\n- Invalid or reversed date windows are rejected with HTTP 400. Existing exports and dashboard continue to use inclusive date boundaries.
+## Workstream A — Business intelligence
+
+### Implemented increment
+- Dashboard now exposes completed sales count and average basket for the selected date window.
+- Dashboard includes revenue for the immediately preceding equal-duration period.
+- Invalid or reversed date windows are rejected with HTTP 400. Existing exports and dashboard continue to use inclusive date boundaries.
 
 The existing `GET /api/v1/reports/dashboard` and Excel/PDF exports are the starting point. Evolve them into a consistent reporting layer:
 - Date-range validation, inclusive/exclusive boundary consistency and safe defaults.
@@ -19,7 +24,11 @@ The existing `GET /api/v1/reports/dashboard` and Excel/PDF exports are the start
 - Export parity: report totals and filters must match dashboard calculations.
 - Explicitly label estimates; do not call gross margin or profit accounting-grade until a proper ledger exists.
 
-### Implemented increment\n- `GET /api/v1/customers?search=...` now supports tenant-scoped partial matching on customer name and phone while preserving pagination and archive filtering.\n- `GET /api/v1/customers/:id/summary` provides completed-sale count, lifetime value, average basket and last purchase, with cross-tenant 404 behavior.\n\n## Workstream B — CRM
+### Implemented increment
+- `GET /api/v1/customers?search=...` now supports tenant-scoped partial matching on customer name and phone while preserving pagination and archive filtering.
+- `GET /api/v1/customers/:id/summary` provides completed-sale count, lifetime value, average basket and last purchase, with cross-tenant 404 behavior.
+
+## Workstream B — CRM
 
 Extend the existing customer module:
 - Customer profile with contact details, active/archive state and transaction summary.
