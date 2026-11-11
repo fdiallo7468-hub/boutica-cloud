@@ -68,6 +68,17 @@ describe('Returns (e2e)', () => {
     expect(afterReturn.body.pointsBalance).toBe(1);
     expect(afterReturn.body.ledger.map((entry: { eventType: string; pointsDelta: number }) => entry.eventType))
       .toEqual(['RETURN_REVERSAL', 'SALE_EARN']);
+
+    const customerSummary = await request(app.getHttpServer())
+      .get(`/api/v1/customers/${customer.body.id}/summary`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    expect(customerSummary.body).toMatchObject({
+      grossLifetimeValue: '1000.00',
+      returnedValue: '500.00',
+      lifetimeValue: '500.00',
+      averageBasket: '500.00',
+    });
   });
 
   it('restocks a returned item and records a RETURN stock movement', async () => {
