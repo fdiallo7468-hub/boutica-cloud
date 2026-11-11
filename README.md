@@ -5,18 +5,18 @@ commerce and inventory management platform for retail merchants. The backend
 can be hosted on standard PostgreSQL and Node.js infrastructure; Neon and
 Render are optional providers.
 
-This is **v2.1**: a hardening pass (v1.1), a second hardening pass that
-cross-checked library APIs against current docs and fixed two
-stock-accounting bugs (v1.2), a re-architecture that removes Docker
-entirely, moves PostgreSQL to Neon, and replaces the hand-rolled JWT auth
-with Better Auth (v2.0), and now a client-readiness finalization pass
-(v2.1) that closes the gaps found by a full API-contract audit — see
-**[BOUTICA_V2_FINALIZATION_REPORT.md](./BOUTICA_V2_FINALIZATION_REPORT.md)**
-for the complete report backing this version. Also see:
+This repository contains the **Boutica Cloud 3.0** backend. The v3 scope
+adds multi-business and multi-location foundations, commerce operations,
+management features, loyalty, and SYSCOHADA accounting through Phase 4.4.
+The database is standard PostgreSQL; Neon and Render are optional hosting
+providers, not product dependencies. See the
+**[self-hosting and transfer guide](./docs/deployment/SELF_HOSTING.md)** for
+installation on infrastructure controlled by the operator. Also see:
 
 - **[AUDIT_REPORT.md](./AUDIT_REPORT.md)** — every problem found across all
   four passes, ranked P0–P3, with the reasoning and the fix.
 - **[CHANGELOG.md](./CHANGELOG.md)** — what actually changed, file by file.
+- **[Phase 4 SYSCOHADA](./docs/PHASE_4_SYSCOHADA.md)** — approved accounting scope and acceptance criteria.
 
 **v2.0 was a breaking change** (auth endpoints moved from
 `/api/v1/auth/register` + `/api/v1/auth/login` to Better Auth's own
