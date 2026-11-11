@@ -40,6 +40,39 @@ These tables carry a `business_id` and must be included in tenant isolation revi
 - `sync_devices`
 - `offline_operations_log`
 
+## 2A. Additional v3 tenant-owned data (migrations 0012–0019)
+
+The initial inventory above predates the v3 schema additions. The following relations are also tenant-owned and must be included in any RLS/policy rollout:
+
+| Table | Tenant key | Notes |
+|---|---|---|
+| `business_locations` | `business_id` | Child of the business root; location IDs are never authorization grants. |
+| `inventory_balances` | `business_id` | Also constrained by composite business/location and business/variant FKs. |
+| `loyalty_configurations` | `business_id` | One configuration per business. |
+| `loyalty_ledger` | `business_id` | Append-only; composite customer FK. |
+| `audit_events` | `business_id` | Append-only; read access must be restricted and tenant-scoped. |
+| `accounting_profiles` | `business_id` | One profile per business. |
+| `accounting_accounts` | `business_id` | Self-parent relationship is composite tenant-safe. |
+| `accounting_fiscal_years` | `business_id` | Tenant-scoped fiscal periods. |
+| `accounting_periods` | `business_id` | Composite FK to fiscal year. |
+| `accounting_journals` | `business_id` | Optional location is validated by composite FK. |
+| `accounting_entries` | `business_id` | Composite FKs to journal, period and reversal entry. |
+| `accounting_entry_lines` | `business_id` | Direct tenant key plus composite FKs to entry, account, customer and supplier. |
+| `accounting_event_mappings` | `business_id` | Composite FKs to journal and accounts. |
+
+The existing child tables without their own `business_id` remain:
+- `purchase_items` → `purchases`
+- `sale_items` → `sales`
+- `return_items` → `returns`
+
+### RLS policy design implications
+
+- Direct-key tables can use a transaction-local `app.business_id` policy predicate once every request and worker query is guaranteed to run inside the same tenant transaction.
+- Child tables without a direct tenant key require a policy that derives ownership through the parent row, or a deliberate additive denormalized tenant key plus composite FK. Do not create a permissive policy on the child table alone.
+- Identity/control-plane tables (`users`, `sessions`, `accounts`, `verifications`, `business_members`) need separate policies and authentication lifecycle analysis; they must not be covered by a blanket `business_id` policy.
+- `notification_outbox` requires a worker-specific access design because the worker claims jobs across businesses before it knows which tenant context to establish.
+- The v3 migrations 0012–0019 are not present in the currently inspected production branch; the inventory describes the feature-branch target schema, not a production schema assertion.
+
 ## 3. Child records without a direct business_id
 
 These records inherit their tenant boundary from a parent record. Their query and RLS design must prevent access through an unrelated parent:
