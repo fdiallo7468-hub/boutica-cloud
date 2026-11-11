@@ -11,7 +11,7 @@ describe('SYSCOHADA accounting money helpers', () => {
     ['12', 1200n],
     ['12.3', 1230n],
     ['12.34', 1234n],
-    [90071992547409.91, 9007199254740991n],
+    ['90071992547409.91', 9007199254740991n],
   ])('converts %s to integer minor units', (value, expected) => {
     expect(accountingAmountToMinorUnits(value as string | number)).toBe(expected);
   });
