@@ -444,3 +444,224 @@ ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
 --> statement-breakpoint
 ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
   REVOKE ALL ON SEQUENCES FROM boutica_runtime;
+
+--> statement-breakpoint
+-- Complete the direct-key coverage: these two tables were missing from the
+-- original tenant table array and must not remain outside RLS.
+ALTER TABLE public.sales ENABLE ROW LEVEL SECURITY;
+--> statement-breakpoint
+ALTER TABLE public.sales FORCE ROW LEVEL SECURITY;
+--> statement-breakpoint
+CREATE POLICY boutica_tenant_isolation ON public.sales
+  FOR ALL TO boutica_runtime
+  USING (business_id=public.boutica_current_business_id())
+  WITH CHECK (business_id=public.boutica_current_business_id());
+--> statement-breakpoint
+ALTER TABLE public.loyalty_configurations ENABLE ROW LEVEL SECURITY;
+--> statement-breakpoint
+ALTER TABLE public.loyalty_configurations FORCE ROW LEVEL SECURITY;
+--> statement-breakpoint
+CREATE POLICY boutica_tenant_isolation ON public.loyalty_configurations
+  FOR ALL TO boutica_runtime
+  USING (business_id=public.boutica_current_business_id())
+  WITH CHECK (business_id=public.boutica_current_business_id());
+--> statement-breakpoint
+
+-- New business rows are assigned an application-generated UUID before INSERT.
+-- This lets INSERT ... RETURNING satisfy the SELECT policy without a bootstrap
+-- visibility gap. The trigger-based Better Auth provisioning path is SECURITY DEFINER.
+DROP POLICY boutica_business_insert ON public.businesses;
+--> statement-breakpoint
+CREATE POLICY boutica_business_insert ON public.businesses
+  FOR INSERT TO boutica_runtime
+  WITH CHECK (
+    id=public.boutica_current_business_id()
+    AND public.boutica_current_actor_user_id() IS NOT NULL
+  );
+--> statement-breakpoint
+DROP POLICY boutica_membership_insert ON public.business_members;
+--> statement-breakpoint
+CREATE POLICY boutica_membership_insert ON public.business_members
+  FOR INSERT TO boutica_runtime
+  WITH CHECK (
+    user_id=public.boutica_current_actor_user_id()
+    AND business_id=public.boutica_current_business_id()
+    AND role='OWNER'
+  );
+--> statement-breakpoint
+
+-- Child references must be tenant-consistent as well as parent-consistent.
+CREATE POLICY sale_items_variant_same_tenant ON public.sale_items AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (EXISTS (
+    SELECT 1 FROM public.variants v
+    WHERE v.id=sale_items.variant_id
+      AND v.business_id=public.boutica_current_business_id()
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.variants v
+    WHERE v.id=sale_items.variant_id
+      AND v.business_id=public.boutica_current_business_id()
+  ));
+--> statement-breakpoint
+CREATE POLICY purchase_items_variant_same_tenant ON public.purchase_items AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (EXISTS (
+    SELECT 1 FROM public.variants v
+    WHERE v.id=purchase_items.variant_id
+      AND v.business_id=public.boutica_current_business_id()
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.variants v
+    WHERE v.id=purchase_items.variant_id
+      AND v.business_id=public.boutica_current_business_id()
+  ));
+--> statement-breakpoint
+CREATE POLICY return_items_consistent_links ON public.return_items AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (EXISTS (
+    SELECT 1 FROM public.returns r
+    JOIN public.sale_items si ON si.id=return_items.sale_item_id
+    JOIN public.sales s ON s.id=si.sale_id
+    JOIN public.variants v ON v.id=return_items.variant_id
+    WHERE r.id=return_items.return_id
+      AND r.business_id=public.boutica_current_business_id()
+      AND r.sale_id=si.sale_id
+      AND si.variant_id=return_items.variant_id
+      AND s.business_id=r.business_id
+      AND v.business_id=r.business_id
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.returns r
+    JOIN public.sale_items si ON si.id=return_items.sale_item_id
+    JOIN public.sales s ON s.id=si.sale_id
+    JOIN public.variants v ON v.id=return_items.variant_id
+    WHERE r.id=return_items.return_id
+      AND r.business_id=public.boutica_current_business_id()
+      AND r.sale_id=si.sale_id
+      AND si.variant_id=return_items.variant_id
+      AND s.business_id=r.business_id
+      AND v.business_id=r.business_id
+  ));
+--> statement-breakpoint
+
+-- Reject cross-tenant references even where a legacy FK checks only a UUID.
+CREATE POLICY sales_customer_same_tenant ON public.sales AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (customer_id IS NULL OR EXISTS (
+    SELECT 1 FROM public.customers c WHERE c.id=sales.customer_id AND c.business_id=sales.business_id
+  ))
+  WITH CHECK (customer_id IS NULL OR EXISTS (
+    SELECT 1 FROM public.customers c WHERE c.id=sales.customer_id AND c.business_id=sales.business_id
+  ));
+--> statement-breakpoint
+CREATE POLICY purchases_supplier_same_tenant ON public.purchases AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (supplier_id IS NULL OR EXISTS (
+    SELECT 1 FROM public.suppliers s WHERE s.id=purchases.supplier_id AND s.business_id=purchases.business_id
+  ))
+  WITH CHECK (supplier_id IS NULL OR EXISTS (
+    SELECT 1 FROM public.suppliers s WHERE s.id=purchases.supplier_id AND s.business_id=purchases.business_id
+  ));
+--> statement-breakpoint
+CREATE POLICY returns_sale_same_tenant ON public.returns AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (EXISTS (
+    SELECT 1 FROM public.sales s WHERE s.id=returns.sale_id AND s.business_id=returns.business_id
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.sales s WHERE s.id=returns.sale_id AND s.business_id=returns.business_id
+  ));
+--> statement-breakpoint
+CREATE POLICY payments_refs_same_tenant ON public.payments AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (
+    (customer_id IS NULL OR EXISTS (SELECT 1 FROM public.customers c WHERE c.id=payments.customer_id AND c.business_id=payments.business_id))
+    AND (sale_id IS NULL OR EXISTS (SELECT 1 FROM public.sales s WHERE s.id=payments.sale_id AND s.business_id=payments.business_id))
+    AND (receivable_id IS NULL OR EXISTS (SELECT 1 FROM public.receivables r WHERE r.id=payments.receivable_id AND r.business_id=payments.business_id))
+  )
+  WITH CHECK (
+    (customer_id IS NULL OR EXISTS (SELECT 1 FROM public.customers c WHERE c.id=payments.customer_id AND c.business_id=payments.business_id))
+    AND (sale_id IS NULL OR EXISTS (SELECT 1 FROM public.sales s WHERE s.id=payments.sale_id AND s.business_id=payments.business_id))
+    AND (receivable_id IS NULL OR EXISTS (SELECT 1 FROM public.receivables r WHERE r.id=payments.receivable_id AND r.business_id=payments.business_id))
+  );
+--> statement-breakpoint
+CREATE POLICY receivables_refs_same_tenant ON public.receivables AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (
+    EXISTS (SELECT 1 FROM public.customers c WHERE c.id=receivables.customer_id AND c.business_id=receivables.business_id)
+    AND (sale_id IS NULL OR EXISTS (SELECT 1 FROM public.sales s WHERE s.id=receivables.sale_id AND s.business_id=receivables.business_id))
+  )
+  WITH CHECK (
+    EXISTS (SELECT 1 FROM public.customers c WHERE c.id=receivables.customer_id AND c.business_id=receivables.business_id)
+    AND (sale_id IS NULL OR EXISTS (SELECT 1 FROM public.sales s WHERE s.id=receivables.sale_id AND s.business_id=receivables.business_id))
+  );
+--> statement-breakpoint
+CREATE POLICY stock_variant_same_tenant ON public.stock AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (EXISTS (SELECT 1 FROM public.variants v WHERE v.id=stock.variant_id AND v.business_id=stock.business_id))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.variants v WHERE v.id=stock.variant_id AND v.business_id=stock.business_id));
+--> statement-breakpoint
+CREATE POLICY stock_movement_variant_same_tenant ON public.stock_movements AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (EXISTS (SELECT 1 FROM public.variants v WHERE v.id=stock_movements.variant_id AND v.business_id=stock_movements.business_id))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.variants v WHERE v.id=stock_movements.variant_id AND v.business_id=stock_movements.business_id));
+--> statement-breakpoint
+CREATE POLICY device_serial_variant_same_tenant ON public.device_serials AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (EXISTS (SELECT 1 FROM public.variants v WHERE v.id=device_serials.variant_id AND v.business_id=device_serials.business_id))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.variants v WHERE v.id=device_serials.variant_id AND v.business_id=device_serials.business_id));
+--> statement-breakpoint
+CREATE POLICY payment_cancel_payment_same_tenant ON public.payment_cancellations AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (EXISTS (SELECT 1 FROM public.payments p WHERE p.id=payment_cancellations.payment_id AND p.business_id=payment_cancellations.business_id))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.payments p WHERE p.id=payment_cancellations.payment_id AND p.business_id=payment_cancellations.business_id));
+--> statement-breakpoint
+CREATE POLICY loyalty_sale_same_tenant ON public.loyalty_ledger AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (related_sale_id IS NULL OR EXISTS (
+    SELECT 1 FROM public.sales s WHERE s.id=loyalty_ledger.related_sale_id AND s.business_id=loyalty_ledger.business_id
+  ))
+  WITH CHECK (related_sale_id IS NULL OR EXISTS (
+    SELECT 1 FROM public.sales s WHERE s.id=loyalty_ledger.related_sale_id AND s.business_id=loyalty_ledger.business_id
+  ));
+--> statement-breakpoint
+CREATE POLICY audit_location_same_tenant ON public.audit_events AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (location_id IS NULL OR EXISTS (
+    SELECT 1 FROM public.business_locations l WHERE l.id=audit_events.location_id AND l.business_id=audit_events.business_id
+  ))
+  WITH CHECK (location_id IS NULL OR EXISTS (
+    SELECT 1 FROM public.business_locations l WHERE l.id=audit_events.location_id AND l.business_id=audit_events.business_id
+  ));
+--> statement-breakpoint
+CREATE POLICY push_device_member_same_tenant ON public.push_devices AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (EXISTS (
+    SELECT 1 FROM public.business_members bm WHERE bm.business_id=push_devices.business_id AND bm.user_id=push_devices.user_id
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.business_members bm WHERE bm.business_id=push_devices.business_id AND bm.user_id=push_devices.user_id
+  ));
+--> statement-breakpoint
+CREATE POLICY sync_device_member_same_tenant ON public.sync_devices AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (EXISTS (
+    SELECT 1 FROM public.business_members bm WHERE bm.business_id=sync_devices.business_id AND bm.user_id=sync_devices.user_id
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.business_members bm WHERE bm.business_id=sync_devices.business_id AND bm.user_id=sync_devices.user_id
+  ));
+--> statement-breakpoint
+
+-- Preserve the append-only audit contract: the runtime can append and read
+-- only the generated identifier needed by INSERT ... RETURNING.
+REVOKE SELECT ON TABLE public.audit_events FROM boutica_runtime;
+GRANT SELECT (id) ON TABLE public.audit_events TO boutica_runtime;
+--> statement-breakpoint
+-- Keep future tables/sequences closed by default; each migration must grant
+-- the exact operations it needs.
+ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
+  REVOKE ALL ON TABLES FROM boutica_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
+  REVOKE ALL ON SEQUENCES FROM boutica_runtime;
