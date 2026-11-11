@@ -71,4 +71,37 @@ export class LoyaltyLedgerService {
     }).onConflictDoNothing();
     return delta;
   }
+  async reverseForCancellation(tx: any, input: { businessId: string; saleId: string; actorUserId: string }) {
+    const [sale] = await tx.select().from(sales).where(and(
+      eq(sales.id, input.saleId), eq(sales.businessId, input.businessId), eq(sales.status, 'CANCELLED'),
+    ));
+    if (!sale?.customerId) return 0;
+    const [earned] = await tx.select({ points: sql<number>`coalesce(sum(${loyaltyLedger.pointsDelta}), 0)::int` })
+      .from(loyaltyLedger).where(and(
+        eq(loyaltyLedger.businessId, input.businessId),
+        eq(loyaltyLedger.relatedSaleId, input.saleId),
+        eq(loyaltyLedger.eventType, 'SALE_EARN'),
+      ));
+    const [reversed] = await tx.select({ points: sql<number>`coalesce(sum(-${loyaltyLedger.pointsDelta}), 0)::int` })
+      .from(loyaltyLedger).where(and(
+        eq(loyaltyLedger.businessId, input.businessId),
+        eq(loyaltyLedger.relatedSaleId, input.saleId),
+        eq(loyaltyLedger.eventType, 'RETURN_REVERSAL'),
+      ));
+    const delta = Math.max(0, (earned?.points ?? 0) - (reversed?.points ?? 0));
+    if (delta === 0) return 0;
+    await tx.insert(loyaltyLedger).values({
+      businessId: input.businessId,
+      customerId: sale.customerId,
+      actorUserId: input.actorUserId,
+      pointsDelta: -delta,
+      eventType: 'SALE_CANCELLATION_REVERSAL',
+      sourceId: input.saleId,
+      relatedSaleId: input.saleId,
+      idempotencyKey: `sale-cancel:${input.saleId}:reverse`,
+      note: 'All remaining earned points reversed on sale cancellation',
+    }).onConflictDoNothing();
+    return delta;
+  }
+
 }
