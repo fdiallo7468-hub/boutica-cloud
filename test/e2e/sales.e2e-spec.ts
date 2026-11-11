@@ -230,6 +230,27 @@ describe('Sales (e2e)', () => {
   });
 
   describe('GET /api/v1/customers/:id/summary', () => {
+    it('returns paginated customer purchase history with tenant and location filters', async () => {
+      const { accessToken } = await registerBusiness(app);
+      const { variantId } = await createProductWithVariant(app, accessToken, { sellingPrice: 25 });
+      await adjustStock(app, accessToken, variantId, 10);
+      const customer = await request(app.getHttpServer())
+        .post('/api/v1/customers').set('Authorization', `Bearer ${accessToken}`)
+        .send({ name: 'History customer' }).expect(201);
+      const sale = await request(app.getHttpServer())
+        .post('/api/v1/sales').set('Authorization', `Bearer ${accessToken}`)
+        .send({ items: [{ variantId, quantity: 2 }], customerId: customer.body.id }).expect(201);
+      const history = await request(app.getHttpServer())
+        .get(`/api/v1/customers/${customer.body.id}/history?limit=10&offset=0`)
+        .set('Authorization', `Bearer ${accessToken}`).expect(200);
+      expect(history.body).toMatchObject({ customerId: customer.body.id, total: 1, limit: 10, offset: 0 });
+      expect(history.body.data[0].id).toBe(sale.body.id);
+      const locationFiltered = await request(app.getHttpServer())
+        .get(`/api/v1/customers/${customer.body.id}/history?locationId=${sale.body.locationId}`)
+        .set('Authorization', `Bearer ${accessToken}`).expect(200);
+      expect(locationFiltered.body.total).toBe(1);
+    });
+
     it('returns tenant-scoped lifetime metrics from completed sales', async () => {
       const { accessToken } = await registerBusiness(app);
       const { variantId } = await createProductWithVariant(app, accessToken, { sellingPrice: 25 });
