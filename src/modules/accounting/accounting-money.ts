@@ -2,6 +2,8 @@ import { BadRequestException } from '@nestjs/common';
 
 export function accountingAmountToMinorUnits(value: string | number | undefined, field = 'amount'): bigint {
   const raw = value === undefined ? '0' : String(value);
+  // Keep the decimal separator escaped once: this regex runs on the original string,
+  // before any numeric conversion that could lose monetary precision.
   if (!/^\d+(\.\d{1,2})?$/.test(raw)) {
     throw new BadRequestException(`${field} must be a non-negative decimal with at most 2 decimals`);
   }
