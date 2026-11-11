@@ -78,7 +78,10 @@ export class AccountingLedgerService {
       }
       if (Boolean(line.auxiliaryType) !== Boolean(line.auxiliaryId)) throw new BadRequestException(`Line ${index + 1}: auxiliaryType and auxiliaryId must be supplied together`);
       if (line.auxiliaryType && !['CUSTOMER', 'SUPPLIER'].includes(line.auxiliaryType)) throw new BadRequestException(`Line ${index + 1}: invalid auxiliaryType`);
-      return { accountId: line.accountId, description: line.description?.trim() || null, debit, credit, auxiliaryType: line.auxiliaryType, auxiliaryId: line.auxiliaryId };
+      const lineDescription = line.description?.trim() || null;
+      if (lineDescription && lineDescription.length > 240) throw new BadRequestException(`Line ${index + 1}: description must not exceed 240 characters`);
+      if (typeof line.accountId !== 'string' || line.accountId.length === 0) throw new BadRequestException(`Line ${index + 1}: accountId is required`);
+      return { accountId: line.accountId, description: lineDescription, debit, credit, auxiliaryType: line.auxiliaryType, auxiliaryId: line.auxiliaryId };
     });
     const debitTotal = normalized.reduce((sum, line) => sum + line.debit, 0n);
     const creditTotal = normalized.reduce((sum, line) => sum + line.credit, 0n);
