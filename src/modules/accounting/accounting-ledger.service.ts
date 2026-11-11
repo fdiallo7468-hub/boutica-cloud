@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
 import {
@@ -79,13 +80,17 @@ export class AccountingLedgerService {
       throw new BadRequestException('Accounting entry is not balanced: total debits must equal total credits and be positive');
     }
 
+    const requestHash = createHash('sha256').update(JSON.stringify({ ...input, entryDate, description })).digest('hex');
     return this.database.db.transaction(async (tx) => {
       if (input.idempotencyKey) {
         const [existing] = await tx.select().from(accountingEntries).where(and(
           eq(accountingEntries.businessId, tenant.businessId),
           eq(accountingEntries.idempotencyKey, input.idempotencyKey!),
         )).limit(1);
-        if (existing) return this.loadEntry(tx, tenant.businessId, existing.id);
+        if (existing) {
+          if (existing.requestHash !== requestHash) throw new ConflictException('Idempotency key was reused with a different accounting payload');
+          return this.loadEntry(tx, tenant.businessId, existing.id);
+        }
       }
       if (input.sourceType && input.sourceId) {
         const [existing] = await tx.select().from(accountingEntries).where(and(
@@ -141,10 +146,11 @@ export class AccountingLedgerService {
         entryNumber,
         entryDate,
         description,
-        status: 'POSTED',
+        status: 'DRAFT',
         sourceType: input.sourceType ?? null,
         sourceId: input.sourceId ?? null,
         idempotencyKey: input.idempotencyKey ?? null,
+        requestHash,
         createdBy: actorId ?? null,
       }).returning();
 
@@ -157,6 +163,9 @@ export class AccountingLedgerService {
         debit: decimal(line.debit),
         credit: decimal(line.credit),
       })));
+      await tx.update(accountingEntries).set({ status: 'POSTED' }).where(and(
+        eq(accountingEntries.id, entry.id), eq(accountingEntries.businessId, tenant.businessId),
+      ));
       return this.loadEntry(tx, tenant.businessId, entry.id);
     });
   }
@@ -184,7 +193,7 @@ export class AccountingLedgerService {
         entryNumber: `REV-${original.entryNumber}`,
         entryDate: original.entryDate,
         description: `Extourne: ${original.description}`.slice(0, 240),
-        status: 'POSTED',
+        status: 'DRAFT',
         sourceType: 'REVERSAL',
         sourceId: original.id,
         reversalOfEntryId: original.id,
@@ -199,6 +208,9 @@ export class AccountingLedgerService {
         debit: line.credit,
         credit: line.debit,
       })));
+      await tx.update(accountingEntries).set({ status: 'POSTED' }).where(and(
+        eq(accountingEntries.id, reversal.id), eq(accountingEntries.businessId, tenant.businessId),
+      ));
       return this.loadEntry(tx, tenant.businessId, reversal.id);
     });
   }
