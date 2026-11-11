@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { accountingAmountToMinorUnits, minorUnitsToAccountingAmount } from './accounting-money';
-import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
 import {
   accountingAccounts,
@@ -123,7 +123,7 @@ export class AccountingLedgerService {
       const accountIds = [...new Set(normalized.map((line) => line.accountId))];
       const accounts = await tx.select().from(accountingAccounts).where(and(
         eq(accountingAccounts.businessId, tenant.businessId),
-        sql`${accountingAccounts.id} = ANY(${accountIds}::uuid[])`,
+        inArray(accountingAccounts.id, accountIds),
       ));
       if (accounts.length !== accountIds.length) throw new BadRequestException('One or more accounts do not belong to this business');
       const accountById = new Map(accounts.map((account) => [account.id, account]));
