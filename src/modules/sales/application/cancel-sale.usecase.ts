@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../../infrastructure/database/database';
-import { inventoryBalances, payments, receivables, returnItems, returns, saleItems, sales, stock, stockMovements } from '../../../infrastructure/database/schema';
+import { inventoryBalances, payments, receivables, returns, saleItems, sales, stock, stockMovements } from '../../../infrastructure/database/schema';
 import { Tenant } from '../../auth/tenant.type';
 import { LoyaltyLedgerService } from '../../loyalty/loyalty-ledger.service';
 
