@@ -13,6 +13,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
 import {
   accountingAccounts,
+  accountingEventMappings,
   accountingFiscalYears,
   accountingJournals,
   accountingPeriods,
@@ -373,6 +374,50 @@ export class AccountingController {
       .where(and(eq(accountingJournals.id, journalId), eq(accountingJournals.businessId, tenant.businessId)))
       .returning();
     return updated;
+  }
+
+
+  @Get('event-mappings')
+  async listEventMappings(@CurrentTenant() tenant: Tenant) {
+    return this.database.db.select().from(accountingEventMappings)
+      .where(eq(accountingEventMappings.businessId, tenant.businessId))
+      .orderBy(asc(accountingEventMappings.sourceType), asc(accountingEventMappings.sourceCategory));
+  }
+
+  @Put('event-mappings/expenses/:category')
+  async configureExpenseMapping(
+    @CurrentTenant() tenant: Tenant,
+    @Param('category') categoryParam: string,
+    @Body() body: { journalId?: unknown; debitAccountId?: unknown; creditAccountId?: unknown },
+  ) {
+    await this.requireProfile(tenant.businessId);
+    const sourceCategory = requiredText(decodeURIComponent(categoryParam), 'category', 80).toLocaleLowerCase('fr-FR');
+    const journalId = requiredText(body.journalId, 'journalId', 36);
+    const debitAccountId = requiredText(body.debitAccountId, 'debitAccountId', 36);
+    const creditAccountId = requiredText(body.creditAccountId, 'creditAccountId', 36);
+    if (debitAccountId === creditAccountId) throw new BadRequestException('Debit and credit accounts must be different');
+
+    const [journal] = await this.database.db.select().from(accountingJournals).where(and(
+      eq(accountingJournals.id, journalId), eq(accountingJournals.businessId, tenant.businessId),
+    )).limit(1);
+    if (!journal || !journal.isActive || !['CASH', 'BANK', 'GENERAL'].includes(journal.journalType)) {
+      throw new BadRequestException('An active CASH, BANK or GENERAL journal belonging to this business is required');
+    }
+    const accounts = await this.database.db.select().from(accountingAccounts).where(and(
+      eq(accountingAccounts.businessId, tenant.businessId),
+      sql`${accountingAccounts.id} IN (${sql.join([sql`${debitAccountId}::uuid`, sql`${creditAccountId}::uuid`], sql`, `)})`,
+    ));
+    if (accounts.length !== 2 || accounts.some((account) => !account.isActive || !account.isPostable)) {
+      throw new BadRequestException('Both mapped accounts must be active, postable and owned by this business');
+    }
+    const [mapping] = await this.database.db.insert(accountingEventMappings).values({
+      businessId: tenant.businessId, sourceType: 'EXPENSE', sourceCategory, journalId,
+      debitAccountId, creditAccountId, isActive: true, updatedAt: new Date(),
+    }).onConflictDoUpdate({
+      target: [accountingEventMappings.businessId, accountingEventMappings.sourceType, accountingEventMappings.sourceCategory],
+      set: { journalId, debitAccountId, creditAccountId, isActive: true, updatedAt: new Date() },
+    }).returning();
+    return mapping;
   }
 
   private async requireProfile(businessId: string): Promise<void> {
