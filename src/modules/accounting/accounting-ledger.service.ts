@@ -41,7 +41,9 @@ function dateOnly(value: string): string {
 function cents(value: string | number | undefined, field: string): bigint {
   const raw = value === undefined ? '0' : String(value);
   if (!/^\d+(\.\d{1,2})?$/.test(raw)) throw new BadRequestException(`${field} must be a non-negative decimal with at most 2 decimals`);
-  const [whole, fraction = ''] = raw.split('.');
+  const parts = raw.split('.');
+  const whole = parts[0] ?? '0';
+  const fraction = parts[1] ?? '';
   return BigInt(whole) * 100n + BigInt((fraction + '00').slice(0, 2));
 }
 
@@ -138,6 +140,7 @@ export class AccountingLedgerService {
         eq(accountingJournals.id, journal.id),
         eq(accountingJournals.businessId, tenant.businessId),
       )).returning({ allocated: sql<number>`${accountingJournals.nextSequence} - 1` });
+      if (!sequence) throw new ConflictException('Could not allocate an accounting journal sequence');
       const entryNumber = `${journal.sequencePrefix}${String(sequence.allocated).padStart(6, '0')}`;
       const [entry] = await tx.insert(accountingEntries).values({
         businessId: tenant.businessId,
@@ -154,6 +157,7 @@ export class AccountingLedgerService {
         createdBy: actorId ?? null,
       }).returning();
 
+      if (!entry) throw new ConflictException('Could not create accounting entry');
       await tx.insert(accountingEntryLines).values(normalized.map((line, index) => ({
         businessId: tenant.businessId,
         entryId: entry.id,
@@ -191,6 +195,7 @@ export class AccountingLedgerService {
         nextSequence: sql`${accountingJournals.nextSequence} + 1`, updatedAt: new Date(),
       }).where(and(eq(accountingJournals.id, journal.id), eq(accountingJournals.businessId, tenant.businessId)))
         .returning({ allocated: sql<number>`${accountingJournals.nextSequence} - 1` });
+      if (!sequence) throw new ConflictException('Could not allocate an accounting journal sequence');
       const [existingReversal] = await tx.select().from(accountingEntries).where(and(
         eq(accountingEntries.businessId, tenant.businessId),
         eq(accountingEntries.reversalOfEntryId, original.id),
@@ -213,6 +218,7 @@ export class AccountingLedgerService {
         reversalOfEntryId: original.id,
         createdBy: actorId ?? null,
       }).returning();
+      if (!reversal) throw new ConflictException('Could not create reversal entry');
       await tx.insert(accountingEntryLines).values(lines.map((line, index) => ({
         businessId: tenant.businessId,
         entryId: reversal.id,
