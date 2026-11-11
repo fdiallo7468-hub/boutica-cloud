@@ -170,13 +170,27 @@ export class AccountingLedgerService {
     });
   }
 
-  async reverse(tenant: Tenant, entryId: string, actorId?: string) {
+  async reverse(tenant: Tenant, entryId: string, periodId: string, reversalDate: string, actorId?: string) {
     return this.database.db.transaction(async (tx) => {
       const [original] = await tx.select().from(accountingEntries).where(and(
         eq(accountingEntries.id, entryId),
         eq(accountingEntries.businessId, tenant.businessId),
       )).limit(1);
       if (!original) throw new NotFoundException('Accounting entry not found');
+      const entryDate = dateOnly(reversalDate);
+      const [period] = await tx.select().from(accountingPeriods).where(and(
+        eq(accountingPeriods.id, periodId), eq(accountingPeriods.businessId, tenant.businessId),
+      )).limit(1);
+      if (!period || period.status !== 'OPEN') throw new ConflictException('Reversal requires an open accounting period');
+      if (entryDate < period.startDate || entryDate > period.endDate) throw new BadRequestException('Reversal date must fall within the selected open period');
+      const [journal] = await tx.select().from(accountingJournals).where(and(
+        eq(accountingJournals.id, original.journalId), eq(accountingJournals.businessId, tenant.businessId),
+      )).for('update').limit(1);
+      if (!journal || !journal.isActive) throw new ConflictException('Original journal is not active');
+      const [sequence] = await tx.update(accountingJournals).set({
+        nextSequence: sql`${accountingJournals.nextSequence} + 1`, updatedAt: new Date(),
+      }).where(and(eq(accountingJournals.id, journal.id), eq(accountingJournals.businessId, tenant.businessId)))
+        .returning({ allocated: sql<number>`${accountingJournals.nextSequence} - 1` });
       const [existingReversal] = await tx.select().from(accountingEntries).where(and(
         eq(accountingEntries.businessId, tenant.businessId),
         eq(accountingEntries.reversalOfEntryId, original.id),
@@ -189,9 +203,9 @@ export class AccountingLedgerService {
       const [reversal] = await tx.insert(accountingEntries).values({
         businessId: tenant.businessId,
         journalId: original.journalId,
-        periodId: original.periodId,
-        entryNumber: `REV-${original.entryNumber}`,
-        entryDate: original.entryDate,
+        periodId: period.id,
+        entryNumber: `${journal.sequencePrefix}${String(sequence.allocated).padStart(6, '0')}`,
+        entryDate,
         description: `Extourne: ${original.description}`.slice(0, 240),
         status: 'DRAFT',
         sourceType: 'REVERSAL',
