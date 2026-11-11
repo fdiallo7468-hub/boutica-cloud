@@ -4,6 +4,7 @@ import ExcelJS from 'exceljs';
 import puppeteer, { type Browser, type Page, type LaunchOptions } from 'puppeteer';
 import { DatabaseService } from '../../infrastructure/database/database';
 import {
+  inventoryBalances,
   products,
   saleItems,
   sales,
@@ -111,8 +112,13 @@ export class ReportsService {
     return Buffer.from(arrayBuffer);
   }
 
-  async exportInventoryExcel(businessId: string): Promise<Buffer> {
-    const items = await this.db.db
+  async exportInventoryExcel(businessId: string, locationId?: string): Promise<Buffer> {
+    const items = locationId ? await this.db.db
+      .select({ productId: products.id, productName: products.name, variantId: variants.id, variantName: variants.name, sku: variants.sku, quantity: inventoryBalances.quantity, cost: variants.purchasePrice, price: variants.sellingPrice })
+      .from(inventoryBalances).innerJoin(variants, and(eq(inventoryBalances.variantId, variants.id), eq(inventoryBalances.businessId, variants.businessId)))
+      .innerJoin(products, eq(variants.productId, products.id))
+      .where(and(eq(inventoryBalances.businessId, businessId), eq(inventoryBalances.locationId, locationId)))
+      .orderBy(products.name, variants.name) : await this.db.db
       .select({
         productId: products.id,
         productName: products.name,
@@ -267,8 +273,13 @@ export class ReportsService {
     return this.renderHtmlToPdf(html);
   }
 
-  async exportInventoryPdf(businessId: string): Promise<Buffer> {
-    const items = await this.db.db
+  async exportInventoryPdf(businessId: string, locationId?: string): Promise<Buffer> {
+    const items = locationId ? await this.db.db
+      .select({ productName: products.name, variantName: variants.name, sku: variants.sku, quantity: inventoryBalances.quantity, price: variants.sellingPrice })
+      .from(inventoryBalances).innerJoin(variants, and(eq(inventoryBalances.variantId, variants.id), eq(inventoryBalances.businessId, variants.businessId)))
+      .innerJoin(products, eq(variants.productId, products.id))
+      .where(and(eq(inventoryBalances.businessId, businessId), eq(inventoryBalances.locationId, locationId)))
+      .orderBy(inventoryBalances.quantity) : await this.db.db
       .select({
         productName: products.name,
         variantName: variants.name,
