@@ -1,7 +1,7 @@
-import { createParamDecorator, ExecutionContext, UnauthorizedException } from "@nestjs/common";
+import { createParamDecorator, ExecutionContext, ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import { fromNodeHeaders } from "better-auth/node";
 import type { Request } from "express";
-import { auth } from "../../auth/auth";
+import { auth, resolveTenantMembership } from "../../auth/auth";
 import { Tenant, UserRole } from "./tenant.type";
 
 /**
@@ -32,9 +32,20 @@ export const CurrentTenant = createParamDecorator(async (_data: unknown, ctx: Ex
     });
   }
 
+  // A session businessId is a tenant selector, not an authorization grant.
+  // Re-check the persisted membership on every tenant-scoped request and use
+  // its role instead of trusting the potentially stale session user field.
+  const membership = await resolveTenantMembership(user.id, user.businessId);
+  if (!membership) {
+    throw new ForbiddenException({
+      code: "BUSINESS_MEMBERSHIP_REQUIRED",
+      message: "Vous n'êtes plus membre de cette entreprise ou l'accès n'est pas autorisé.",
+    });
+  }
+
   return {
     userId: user.id,
     businessId: user.businessId,
-    role: user.role ?? "OWNER",
+    role: membership.role,
   };
 });
