@@ -1,12 +1,13 @@
 -- Phase 3 loyalty foundation: tenant configuration and append-only points ledger.
 CREATE TABLE public.loyalty_configurations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  business_id uuid NOT NULL UNIQUE REFERENCES public.businesses(id) ON DELETE CASCADE,
+  business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
   enabled boolean NOT NULL DEFAULT false,
   earn_points_per_1000 integer NOT NULL DEFAULT 1 CHECK (earn_points_per_1000 >= 0),
   point_value numeric(14,4) NOT NULL DEFAULT 1 CHECK (point_value > 0),
   minimum_redemption_points integer NOT NULL DEFAULT 100 CHECK (minimum_redemption_points >= 0),
   expiry_days integer CHECK (expiry_days IS NULL OR expiry_days > 0),
+  CONSTRAINT loyalty_configurations_business_unique UNIQUE (business_id),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
