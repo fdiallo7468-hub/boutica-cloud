@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsDateString, IsInt, IsOptional, Min } from 'class-validator';
+import { IsDateString, IsIn, IsInt, IsOptional, IsUUID, Min } from 'class-validator';
 
 export class DashboardQueryDto {
   // Inclusive start of the reporting window. Defaults to the first day of
@@ -12,6 +12,14 @@ export class DashboardQueryDto {
   @IsOptional()
   @IsDateString()
   to?: string;
+
+  @IsOptional()
+  @IsUUID()
+  locationId?: string;
+
+  @IsOptional()
+  @IsIn(['day', 'week', 'month'])
+  granularity: 'day' | 'week' | 'month' = 'day';
 
   @IsOptional()
   @Type(() => Number)
