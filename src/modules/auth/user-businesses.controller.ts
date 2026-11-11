@@ -23,6 +23,7 @@ import {
   Matches,
 } from "class-validator";
 import { and, eq, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import type { Request } from "express";
 import { auth } from "../../auth/auth";
 import { DatabaseService } from "../../infrastructure/database/database";
@@ -249,13 +250,17 @@ export class UserBusinessesController {
     const address = body.address?.trim() || null;
 
     const result = await this.db.baseDb.transaction(async (tx) => {
+      const businessId = randomUUID();
       await tx.execute(sql`
-        SELECT set_config('app.actor_user_id', ${user.id}, true)
+        SELECT
+          set_config('app.actor_user_id', ${user.id}, true),
+          set_config('app.business_id', ${businessId}, true)
       `);
 
       const [business] = await tx
         .insert(businesses)
         .values({
+          id: businessId,
           name,
           currency,
           phone,
@@ -268,9 +273,6 @@ export class UserBusinessesController {
         throw new Error("Impossible d'insérer l'entreprise");
       }
 
-      await tx.execute(sql`
-        SELECT set_config('app.business_id', ${business.id}, true)
-      `);
 
       // Membership as OWNER
       await tx.insert(businessMembers).values({
