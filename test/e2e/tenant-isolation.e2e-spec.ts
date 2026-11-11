@@ -2,6 +2,8 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createProductWithVariant, createTestApp, registerBusiness, resetDatabase } from '../utils/test-app';
 import { DatabaseService } from '../../src/infrastructure/database/database';
+import { and, eq } from 'drizzle-orm';
+import { businessMembers } from '../../src/infrastructure/database/schema';
 
 describe('Tenant isolation (e2e)', () => {
   let app: INestApplication;
@@ -25,6 +27,23 @@ describe('Tenant isolation (e2e)', () => {
   it('rejects a garbage bearer token', async () => {
     await request(app.getHttpServer()).get('/api/v1/products').set('Authorization', 'Bearer not-a-real-token').expect(401);
   });
+
+  it('revoked business membership immediately blocks an otherwise valid session', async () => {
+    const member = await registerBusiness(app, 'Revoked Membership Shop');
+
+    await db.db
+      .delete(businessMembers)
+      .where(and(
+        eq(businessMembers.businessId, member.businessId),
+        eq(businessMembers.userId, member.userId),
+      ));
+
+    await request(app.getHttpServer())
+      .get('/api/v1/products')
+      .set('Authorization', `Bearer ${member.accessToken}`)
+      .expect(403);
+  });
+
 
   it('business B cannot read business A products (GET Business B products)', async () => {
     const a = await registerBusiness(app, 'Shop A');
