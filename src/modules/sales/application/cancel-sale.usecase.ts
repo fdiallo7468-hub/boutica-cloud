@@ -1,5 +1,5 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { and, eq, sql } from 'drizzle-orm';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../../infrastructure/database/database';
 import { inventoryBalances, payments, receivables, returns, saleItems, sales, stock, stockMovements } from '../../../infrastructure/database/schema';
 import { Tenant } from '../../auth/tenant.type';
@@ -23,14 +23,18 @@ export class CancelSaleUseCase {
       )).limit(1);
       if (completedReturn) throw new ConflictException('A sale with completed returns cannot be cancelled; process the remaining items as returns');
 
-      const [confirmedPayment] = await tx.select({ id: payments.id }).from(payments).where(and(
-        eq(payments.businessId, tenant.businessId), eq(payments.saleId, saleId), eq(payments.status, 'CONFIRMED'),
-      )).limit(1);
-      if (confirmedPayment) throw new ConflictException('A sale with confirmed payments cannot be cancelled until its payment is reversed');
-
       const saleReceivables = await tx.select().from(receivables).where(and(
         eq(receivables.businessId, tenant.businessId), eq(receivables.saleId, saleId),
       ));
+      const receivableIds = saleReceivables.map((row: { id: string }) => row.id);
+      const paymentScope = [eq(payments.businessId, tenant.businessId), eq(payments.status, 'CONFIRMED')];
+      const paymentReference = receivableIds.length
+        ? or(eq(payments.saleId, saleId), inArray(payments.receivableId, receivableIds))
+        : eq(payments.saleId, saleId);
+      const [confirmedPayment] = await tx.select({ id: payments.id }).from(payments)
+        .where(and(...paymentScope, paymentReference)).limit(1);
+      if (confirmedPayment) throw new ConflictException('A sale with confirmed payments cannot be cancelled until its payment is reversed');
+
       if (saleReceivables.some((row: { paidAmount: string }) => Number(row.paidAmount) > 0)) {
         throw new ConflictException('A sale with paid receivables cannot be cancelled until its payment is reversed');
       }
