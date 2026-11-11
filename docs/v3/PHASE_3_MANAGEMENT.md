@@ -1,6 +1,6 @@
 # Boutica Cloud 3.0 — Phase 3: Management, BI & CRM
 
-**Status:** Implementation in progress — CRM metrics/search/segments, BI KPI baseline and transactional loyalty ledger are being integrated and validated  
+**Status:** Implementation complete — final PostgreSQL/CI validation pending  
 **Branch / PR:** `feat/boutica-cloud-v3-foundation` / PR #5  
 **Prerequisites:** Phase 1 development gate accepted; Phase 2 operations and location-aware inventory integrated.
 
@@ -11,7 +11,12 @@ Give business owners and managers a reliable view of business performance and to
 ## Workstream A — Business intelligence
 
 ### Implemented increment
-- Dashboard now exposes completed sales count and average basket for the selected date window.
+- Dashboard exposes revenue, completed sale count, average basket, discount totals, gross-margin estimate, estimated operating result, inventory valuation, receivables, low-stock alerts and top/recent sales.
+- Day/week/month time series and equal-duration previous-period revenue comparison are available.
+- Dashboard supports server-validated location filtering; stock valuation and low-stock alerts use per-location balances when filtered.
+- Excel/PDF sales exports apply the same date/location filters; Excel grand totals use actual sale totals after discounts rather than summing undiscounted line totals.
+- Inventory Excel/PDF exports accept a server-validated location filter.
+- Estimated profit is explicitly flagged as an estimate; this is not general-ledger accounting.
 - Dashboard includes revenue for the immediately preceding equal-duration period.
 - Invalid or reversed date windows are rejected with HTTP 400. Existing exports and dashboard continue to use inclusive date boundaries.
 
@@ -48,7 +53,10 @@ Introduce a ledger-based loyalty foundation only after CRM identity and transact
 - Append-only points ledger with source transaction, actor, tenant and idempotency key.
 - Earn points only from completed, non-cancelled sales; reverse/adjust points on returns and cancellations.
 - Prevent negative balances and duplicate awards.
-- Implemented migration `0015_loyalty_ledger.sql`, per-business configuration, unique idempotency keys, immutable database trigger and transaction-bound sale awards/return reversals. Redemption is intentionally not exposed until the ledger and redemption accounting are separately verified.
+- Implemented migration `0015_loyalty_ledger.sql`, per-business configuration, unique idempotency keys, immutable database trigger and transaction-bound sale awards, proportional return reversals and cancellation reversals.
+- `POST /api/v1/sales/:id/cancel` atomically restores stock and reverses points for unpaid sales without completed returns. It cancels unpaid receivables, and blocks cancellation when confirmed payments or completed returns exist.
+- Customer balance/history is exposed at `GET /api/v1/loyalty/customers/:customerId`.
+- Redemption is deliberately not exposed: it needs a separately reviewed cash/discount settlement flow and concurrency controls.
 - Do not add customer-facing redemption until ledger invariants and tests are in place.
 
 ## Delivery order
@@ -58,6 +66,18 @@ Introduce a ledger-based loyalty foundation only after CRM identity and transact
 3. Loyalty schema, service and idempotent ledger.
 4. Tests for tenant isolation, date boundaries, aggregation consistency, return reversals and duplicate event handling.
 5. Documentation and CI verification.
+
+## Implementation closeout checklist
+
+- [x] BI dashboard KPIs, comparisons, time series and location filters.
+- [x] Discount-aware estimated margin and explicit estimate labeling.
+- [x] Sales and inventory exports with location parity.
+- [x] CRM search, profile summary, net lifetime metrics, segmentation and paginated history.
+- [x] Loyalty configuration, append-only ledger, sale earning, proportional return reversal and safe sale-cancellation reversal.
+- [x] E2E coverage for loyalty earning/reversals, CRM return reconciliation, BI time series and cross-tenant location rejection.
+- [ ] Latest PR #5 CI green on the final head SHA.
+
+A green CI run is the final development gate. Production Neon migration, Render deployment and PR merge remain separate approval steps.
 
 ## Non-goals for this phase
 
@@ -70,6 +90,7 @@ Introduce a ledger-based loyalty foundation only after CRM identity and transact
 - All aggregates are tenant-scoped and tested against seeded PostgreSQL data.
 - Date filters and location filters produce deterministic, documented results.
 - Dashboard and exports agree on totals.
-- CRM metrics reconcile with underlying sales and returns.
-- Loyalty ledger is append-only and idempotent; proportional return reversals are transaction-bound and tested. Sale cancellation reversal remains pending if/when a supported cancellation workflow is introduced.
+- CRM net lifetime value reconciles with completed sales less completed returns.
+- Loyalty points are earned only on completed sales, with append-only/idempotent entries and compensating reversals on returns and supported cancellations.
+- Loyalty ledger is append-only and idempotent; proportional return and cancellation reversals are transaction-bound and tested. Cancellation is intentionally rejected for sales with completed returns or confirmed payments.
 - Lint, unit tests, PostgreSQL integration tests and production build pass on PR #5.
