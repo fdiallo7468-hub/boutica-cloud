@@ -229,6 +229,53 @@ describe('Sales (e2e)', () => {
     });
   });
 
+  describe('GET /api/v1/customers/:id/summary', () => {
+    it('returns tenant-scoped lifetime metrics from completed sales', async () => {
+      const { accessToken } = await registerBusiness(app);
+      const { variantId } = await createProductWithVariant(app, accessToken, { sellingPrice: 25 });
+      await adjustStock(app, accessToken, variantId, 10);
+      const customer = await request(app.getHttpServer())
+        .post('/api/v1/customers')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ name: 'Aminata' })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post('/api/v1/sales')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ items: [{ variantId, quantity: 2 }], customerId: customer.body.id })
+        .expect(201);
+
+      const summary = await request(app.getHttpServer())
+        .get(`/api/v1/customers/${customer.body.id}/summary`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      expect(summary.body).toMatchObject({
+        customerId: customer.body.id,
+        completedSalesCount: 1,
+        lifetimeValue: '50.00',
+        averageBasket: '50.0000000000000000',
+      });
+      expect(summary.body.lastPurchaseAt).toBeTruthy();
+    });
+
+    it('does not reveal a customer summary from another business', async () => {
+      const first = await registerBusiness(app);
+      const second = await registerBusiness(app);
+      const customer = await request(app.getHttpServer())
+        .post('/api/v1/customers')
+        .set('Authorization', `Bearer ${first.accessToken}`)
+        .send({ name: 'Tenant A customer' })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .get(`/api/v1/customers/${customer.body.id}/summary`)
+        .set('Authorization', `Bearer ${second.accessToken}`)
+        .expect(404);
+    });
+  });
+
   describe('GET /api/v1/sales/:id', () => {
     it('returns the sale with its line items', async () => {
       const { accessToken } = await registerBusiness(app);
