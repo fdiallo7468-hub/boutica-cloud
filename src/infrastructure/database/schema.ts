@@ -915,7 +915,7 @@ export const accountingEntryLines = pgTable(
     entryId: uuid('entry_id').notNull(),
     lineNumber: integer('line_number').notNull(),
     accountId: uuid('account_id').notNull(),
-    description: text('description'),
+    description: varchar('description', { length: 240 }),
     customerId: uuid('customer_id'),
     supplierId: uuid('supplier_id'),
     debit: numeric('debit', { precision: 18, scale: 2 }).notNull().default('0'),
