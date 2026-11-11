@@ -23,6 +23,7 @@ import { FinanceService } from '../finance/finance.service';
 import { PaymentMethodEnum } from '../finance/dto/finance.dto';
 import { NotificationOutboxService } from '../notifications/notification-outbox.service';
 import { NOVU_EVENT_TYPES } from '../notifications/novu.types';
+import { LoyaltyLedgerService } from '../loyalty/loyalty-ledger.service';
 import { OfflineOperationItemDto, RegisterDeviceDto, SyncPushDto } from './dto/sync.dto';
 
 @Injectable()
@@ -33,6 +34,7 @@ export class SyncService {
     private readonly db: DatabaseService,
     private readonly financeService: FinanceService,
     private readonly outboxService: NotificationOutboxService,
+    private readonly loyaltyLedger: LoyaltyLedgerService,
   ) {}
 
   /**
@@ -461,6 +463,14 @@ export class SyncService {
                   });
                 }
               }
+
+              await this.loyaltyLedger.awardForSale(operationTx, {
+                businessId: tenant.businessId,
+                customerId: p.customerId || null,
+                saleId: entityId!,
+                actorUserId: tenant.userId,
+                total: (totalCents / 100).toFixed(2),
+              });
 
               // Émission d'événement outbox Novu
               await this.outboxService.enqueue(operationTx, {
