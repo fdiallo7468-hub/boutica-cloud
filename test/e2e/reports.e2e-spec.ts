@@ -92,8 +92,10 @@ describe('Reports (e2e)', () => {
     const second = await registerBusiness(app, 'Report tenant B');
     const [foreignLocation] = await db.db.select({ id: businessLocations.id }).from(businessLocations)
       .where(eq(businessLocations.businessId, second.businessId));
+
+    expect(foreignLocation).toBeDefined();
     await request(app.getHttpServer())
-      .get(`/api/v1/reports/dashboard?locationId=${foreignLocation.id}`)
+      .get(`/api/v1/reports/dashboard?locationId=${foreignLocation!.id}`)
       .set('Authorization', `Bearer ${first.accessToken}`)
       .expect(404);
   });
@@ -131,7 +133,7 @@ describe('Reports (e2e)', () => {
     expect(res.body.estimatedProfit).toBe('-48.00'); // 2.00 margin - 50.00 expenses
   });
 
-  it('keeps an old sale\'s margin unchanged after the variant\'s purchase price is updated later (v2.0 regression test)', async () => {
+  it('keeps an old sale\\'s margin unchanged after the variant\\'s purchase price is updated later (v2.0 regression test)', async () => {
     // Directly via Drizzle, not the API: there is currently no endpoint to
     // edit a variant's price after creation (flagged in AUDIT_REPORT.md
     // section H as a gap, not fixed here) — this is the only way to
