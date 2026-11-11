@@ -1,3 +1,6 @@
+ALTER TABLE public.accounting_journals
+  ADD CONSTRAINT accounting_journals_business_id_id_unique UNIQUE (business_id, id);
+
 -- Boutica Cloud 3.0 — Phase 4.2/4.4: journal entries and ledger.
 -- Additive migration. Production is not migrated by this change.
 CREATE TABLE public.accounting_entries (
