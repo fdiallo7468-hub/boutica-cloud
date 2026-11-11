@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { adjustStock, createProductWithVariant, createTestApp, registerBusiness, resetDatabase } from '../utils/test-app';
 import { DatabaseService } from '../../src/infrastructure/database/database';
-import { variants } from '../../src/infrastructure/database/schema';
+import { businessLocations, variants } from '../../src/infrastructure/database/schema';
 
 describe('Reports (e2e)', () => {
   let app: INestApplication;
@@ -66,6 +66,17 @@ describe('Reports (e2e)', () => {
 
     expect(res.body.lowStockAlerts).toHaveLength(1);
     expect(res.body.lowStockAlerts[0]).toMatchObject({ variantId, quantity: 3 });
+  });
+
+  it('rejects a location filter belonging to another business', async () => {
+    const first = await registerBusiness(app, 'Report tenant A');
+    const second = await registerBusiness(app, 'Report tenant B');
+    const [foreignLocation] = await db.db.select({ id: businessLocations.id }).from(businessLocations)
+      .where(eq(businessLocations.businessId, second.businessId));
+    await request(app.getHttpServer())
+      .get(`/api/v1/reports/dashboard?locationId=${foreignLocation.id}`)
+      .set('Authorization', `Bearer ${first.accessToken}`)
+      .expect(404);
   });
 
   it('rejects an unauthenticated request', async () => {
