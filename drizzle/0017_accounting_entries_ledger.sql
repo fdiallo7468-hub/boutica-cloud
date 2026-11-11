@@ -8,10 +8,11 @@ CREATE TABLE public.accounting_entries (
   entry_number varchar(60) NOT NULL,
   entry_date date NOT NULL,
   description varchar(240) NOT NULL,
-  status text NOT NULL DEFAULT 'POSTED',
+  status text NOT NULL DEFAULT 'DRAFT',
   source_type text,
   source_id text,
   idempotency_key varchar(120),
+  request_hash char(64),
   reversal_of_entry_id uuid,
   posted_at timestamptz NOT NULL DEFAULT now(),
   created_by text,
@@ -24,7 +25,7 @@ CREATE TABLE public.accounting_entries (
     REFERENCES public.accounting_periods (business_id, id) ON DELETE RESTRICT,
   CONSTRAINT accounting_entries_reversal_fk FOREIGN KEY (business_id, reversal_of_entry_id)
     REFERENCES public.accounting_entries (business_id, id) ON DELETE RESTRICT,
-  CONSTRAINT accounting_entries_status_check CHECK (status IN ('POSTED')),
+  CONSTRAINT accounting_entries_status_check CHECK (status IN ('DRAFT', 'POSTED')),
   CONSTRAINT accounting_entries_source_pair_check CHECK ((source_type IS NULL) = (source_id IS NULL)),
   CONSTRAINT accounting_entries_description_check CHECK (length(btrim(description)) BETWEEN 2 AND 240),
   CONSTRAINT accounting_entries_no_self_reversal CHECK (reversal_of_entry_id IS NULL OR reversal_of_entry_id <> id)
@@ -100,5 +101,5 @@ CREATE TRIGGER accounting_entries_append_only
   BEFORE UPDATE OR DELETE ON public.accounting_entries
   FOR EACH ROW EXECUTE FUNCTION public.reject_posted_accounting_entry_mutation();
 CREATE TRIGGER accounting_entry_lines_append_only
-  BEFORE UPDATE OR DELETE ON public.accounting_entry_lines
+  BEFORE INSERT OR UPDATE OR DELETE ON public.accounting_entry_lines
   FOR EACH ROW EXECUTE FUNCTION public.reject_posted_accounting_entry_mutation();
