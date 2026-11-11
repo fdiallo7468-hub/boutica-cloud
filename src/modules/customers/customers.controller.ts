@@ -55,7 +55,7 @@ export class CustomersController {
       .select({
         completedSalesCount: count(),
         lifetimeValue: sql<string>`coalesce(sum(${sales.total}), 0)::text`,
-        averageBasket: sql<string>`coalesce(avg(${sales.total}), 0)::text`,
+        averageBasket: sql<string>`coalesce(round(avg(${sales.total}), 2), 0)::text`,
         lastPurchaseAt: sql<Date | null>`max(${sales.createdAt})`,
       })
       .from(sales)
