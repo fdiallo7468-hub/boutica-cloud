@@ -377,7 +377,7 @@ export const suppliers = pgTable('suppliers', {
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
+}, (t) => ({ businessIdIdUnique: uniqueIndex('suppliers_business_id_id_unique').on(t.businessId, t.id) }));
 
 export const purchases = pgTable('purchases', {
   id: uuid('id').defaultRandom().primaryKey(),
