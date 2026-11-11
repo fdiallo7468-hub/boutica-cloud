@@ -187,9 +187,11 @@ export class ReportsController {
   @Header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
   async exportInventoryExcel(
     @CurrentTenant() tenant: Tenant,
+    @Query('locationId') locationId: string | undefined,
     @Res() res: Response,
   ) {
-    const buffer = await this.reportsService.exportInventoryExcel(tenant.businessId);
+    await this.validateExportLocation(tenant.businessId, locationId);
+    const buffer = await this.reportsService.exportInventoryExcel(tenant.businessId, locationId);
     res.setHeader('Content-Disposition', `attachment; filename="inventaire-${new Date().toISOString().slice(0, 10)}.xlsx"`);
     res.end(buffer);
   }
@@ -217,9 +219,11 @@ export class ReportsController {
   @Get('inventory/pdf')
   async exportInventoryPdf(
     @CurrentTenant() tenant: Tenant,
+    @Query('locationId') locationId: string | undefined,
     @Res() res: Response,
   ) {
-    const buffer = await this.reportsService.exportInventoryPdf(tenant.businessId);
+    await this.validateExportLocation(tenant.businessId, locationId);
+    const buffer = await this.reportsService.exportInventoryPdf(tenant.businessId, locationId);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="etat-stocks-${new Date().toISOString().slice(0, 10)}.pdf"`);
     res.end(buffer);
