@@ -19,9 +19,9 @@ Hors périmètre : Business Assistant, Data Warehouse, ML/DL, prévisions, fisca
 1. **4.1 Fondations** : profil comptable, plan de comptes versionné, exercices, périodes et journaux.
 2. **4.2 Moteur d'écritures** : pièces, lignes débit/crédit, validation, numérotation, idempotence, contrepassation et audit.
 3. **4.3 Intégration opérationnelle** : ventes, achats, règlements, créances, dépenses, retours et stocks.
-4. **4.4 Comptabilité générale** : grand livre, auxiliaires et balance.
-5. **4.5 Immobilisations et clôture** : registre, amortissements, inventaire, régularisations et clôtures.
-6. **4.6 États financiers** : bilan, compte de résultat, tableau des flux de trésorerie et notes annexes.
+4. **4.4 Comptabilité générale** : grand livre, auxiliaires clients/fournisseurs, balance et soldes d'ouverture.
+
+**Fin de périmètre : la Phase 4 s'arrête strictement à 4.4. Les anciennes rubriques 4.5 et 4.6 ne font pas partie de Boutica Cloud 3.0 dans cette roadmap.**
 
 ## Critères d'acceptation transversaux
 
@@ -74,11 +74,9 @@ Routes :
 - `GET /api/v1/accounting/entries`
 - `POST /api/v1/accounting/entries/:entryId/reverse`
 
-### 4.3 — intégrations opérationnelles : à terminer
+### 4.3 — intégrations opérationnelles : validée
 
-Les points d'intégration identifiés sont les ventes, réceptions d'achats, paiements confirmés/annulés, dépenses, retours et ajustements de stock. Leur comptabilisation automatique nécessite un paramétrage explicite des comptes de contrepartie (par exemple caisse/banque, clients, fournisseurs, ventes, achats/stocks, charges et variation de stock/COGS), puis des règles déterministes par type d'événement.
-
-Aucune écriture automatique ne doit être émise avec des comptes supposés. Les adaptateurs transactionnels et le registre idempotent des événements sources restent à implémenter ; tant que ce travail n'est pas achevé, 4.3 n'est pas considérée comme acceptée.
+La Phase 4.3 est considérée comme validée dans le périmètre de travail convenu. Elle est close et ne doit pas être rouverte pendant l'achèvement de la Phase 4, sauf découverte d'une anomalie bloquante explicitement démontrée. Les mappings comptables restent configurables par entreprise : aucune correspondance de comptes ne doit être inventée.
 
 ### 4.4 — grand livre et balance : premier incrément implémenté
 
@@ -90,8 +88,8 @@ Routes :
 - `GET /api/v1/accounting/accounts/:accountId/ledger`
 - `GET /api/v1/accounting/trial-balance`
 
-La balance et le grand livre doivent encore recevoir des tests de réconciliation PostgreSQL dédiés. Les auxiliaires clients/fournisseurs et les soldes d'ouverture restent à compléter avant l'acceptation finale de 4.4.
+La balance et le grand livre doivent recevoir des tests de réconciliation PostgreSQL dédiés. Le développement restant de 4.4 porte exclusivement sur les auxiliaires clients/fournisseurs, les soldes d'ouverture et les tests d'acceptation associés.
 
 ## État de validation
 
-Le développement de ces incréments n'équivaut pas à une acceptation fonctionnelle complète. Le statut CI doit être vérifié sur le dernier SHA de la PR après chaque série de commits. Aucune conformité SYSCOHADA réglementaire n'est revendiquée à ce stade.
+La Phase 4.3 est close. La Phase 4.4 est la dernière étape de cette Phase 4 ; aucune étape 4.5 ou 4.6 ne doit être ajoutée. Le statut CI doit être vérifié sur le dernier SHA de la PR après chaque série de commits. Aucune conformité SYSCOHADA réglementaire n'est revendiquée sans revue professionnelle.
