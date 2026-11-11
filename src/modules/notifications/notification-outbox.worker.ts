@@ -144,6 +144,7 @@ export class NotificationOutboxWorker implements OnModuleInit, OnModuleDestroy {
             })
             .where(and(
               eq(notificationOutbox.id, event.id),
+              eq(notificationOutbox.businessId, event.businessId),
               eq(notificationOutbox.status, 'PROCESSING'),
             ));
           failed++;
