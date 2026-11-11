@@ -4,10 +4,10 @@ describe('envSchema Validation & Security', () => {
   const validProductionEnv = {
     NODE_ENV: 'production',
     PORT: '3000',
-    DATABASE_URL: 'postgresql://neondb_owner:prod_secret_pass@ep-cool-wildflower.neon.tech/neondb?sslmode=require',
+    DATABASE_URL: 'postgresql://boutica_app:prod_secret_pass@db.example.net/boutica?sslmode=require',
     BETTER_AUTH_SECRET: 'production_super_secure_random_key_with_high_entropy_12345!',
-    BETTER_AUTH_URL: 'https://boutica-cloud.onrender.com',
-    CORS_ORIGIN: 'https://boutica-cloud.onrender.com,https://app.boutica.cloud',
+    BETTER_AUTH_URL: 'https://api.example.com',
+    CORS_ORIGIN: 'https://api.example.com,https://app.example.com',
     ARCJET_KEY: 'ajkey_ci_test_production_123456789',
     CLOUDINARY_CLOUD_NAME: 'boutica-cloud',
     CLOUDINARY_API_KEY: 'cloudinary-test-api-key',
@@ -43,8 +43,7 @@ describe('envSchema Validation & Security', () => {
     it('devrait autoriser les domaines publics légitimes', () => {
       expect(isPrivateOrDangerousHost('boutica.cloud')).toBe(false);
       expect(isPrivateOrDangerousHost('api.boutica.cloud')).toBe(false);
-      expect(isPrivateOrDangerousHost('boutica-cloud.onrender.com')).toBe(false);
-      expect(isPrivateOrDangerousHost('neon.tech')).toBe(false);
+      expect(isPrivateOrDangerousHost('api.example.com')).toBe(false);
     });
   });
 
@@ -76,7 +75,7 @@ describe('envSchema Validation & Security', () => {
     it('devrait rejeter BETTER_AUTH_URL en HTTP simple en production', () => {
       const dangerous = {
         ...validProductionEnv,
-        BETTER_AUTH_URL: 'http://boutica-cloud.onrender.com',
+        BETTER_AUTH_URL: 'http://api.example.com',
       };
       const result = envSchema.safeParse(dangerous);
       expect(result.success).toBe(false);
@@ -191,16 +190,25 @@ describe('envSchema Validation & Security', () => {
       }
     });
 
-    it('devrait rejeter une DATABASE_URL pointant vers localhost en production', () => {
-      const dangerous = {
+    it('devrait accepter une base PostgreSQL locale avec des identifiants dédiés en production', () => {
+      const selfHosted = {
+        ...validProductionEnv,
+        DATABASE_URL: 'postgresql://boutica_app:strong_local_password@localhost:5432/boutica',
+      };
+      const result = envSchema.safeParse(selfHosted);
+      expect(result.success).toBe(true);
+    });
+
+    it('devrait rejeter la chaîne PostgreSQL de démonstration connue en production', () => {
+      const demo = {
         ...validProductionEnv,
         DATABASE_URL: 'postgresql://user:password@localhost:5432/boutica',
       };
-      const result = envSchema.safeParse(dangerous);
+      const result = envSchema.safeParse(demo);
       expect(result.success).toBe(false);
       if (!result.success) {
         const dbIssue = result.error.issues.find((i) => i.path.includes('DATABASE_URL'));
-        expect(dbIssue?.message).toContain('localhost or demo fallback');
+        expect(dbIssue?.message).toContain('known development/demo fallback');
       }
     });
 
