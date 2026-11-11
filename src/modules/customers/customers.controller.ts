@@ -12,9 +12,9 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { and, count, eq } from 'drizzle-orm';
+import { and, count, eq, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
-import { customers } from '../../infrastructure/database/schema';
+import { customers, sales } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { Tenant } from '../auth/tenant.type';
 import { PaginationQueryDto } from '../../common/pagination.dto';
@@ -41,6 +41,37 @@ export class CustomersController {
     ]);
     const total = countResult[0]?.value ?? 0;
     return { data, page: query.page, pageSize: query.pageSize, total };
+  }
+
+  @Get(':id/summary')
+  async summary(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) id: string) {
+    const [customer] = await this.db.db
+      .select({ id: customers.id })
+      .from(customers)
+      .where(and(eq(customers.id, id), eq(customers.businessId, tenant.businessId)));
+    if (!customer) throw new NotFoundException('Customer not found');
+
+    const [metrics] = await this.db.db
+      .select({
+        completedSalesCount: count(),
+        lifetimeValue: sql<string>`coalesce(sum(${sales.total}), 0)::text`,
+        averageBasket: sql<string>`coalesce(avg(${sales.total}), 0)::text`,
+        lastPurchaseAt: sql<Date | null>`max(${sales.createdAt})`,
+      })
+      .from(sales)
+      .where(and(
+        eq(sales.businessId, tenant.businessId),
+        eq(sales.customerId, id),
+        eq(sales.status, 'COMPLETED'),
+      ));
+
+    return {
+      customerId: customer.id,
+      completedSalesCount: metrics?.completedSalesCount ?? 0,
+      lifetimeValue: metrics?.lifetimeValue ?? '0',
+      averageBasket: metrics?.averageBasket ?? '0',
+      lastPurchaseAt: metrics?.lastPurchaseAt ?? null,
+    };
   }
 
   @Get(':id')
