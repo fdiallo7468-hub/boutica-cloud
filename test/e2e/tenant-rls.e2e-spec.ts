@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { and, eq, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { createProductWithVariant, createTestApp, registerBusiness, resetDatabase, adjustStock } from '../utils/test-app';
 import { DatabaseService } from '../../src/infrastructure/database/database';
 import { products, saleItems } from '../../src/infrastructure/database/schema';
