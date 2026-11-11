@@ -478,7 +478,7 @@ export const loyaltyLedger = pgTable('loyalty_ledger', {
   customerTimeIdx: index('loyalty_ledger_customer_time_idx').on(t.businessId, t.customerId, t.createdAt),
   saleIdx: index('loyalty_ledger_sale_idx').on(t.businessId, t.relatedSaleId),
   nonZeroDelta: check('loyalty_ledger_non_zero_delta', sql`${t.pointsDelta} <> 0`),
-  validEvent: check('loyalty_ledger_event_type_valid', sql`${t.eventType} IN ('SALE_EARN','RETURN_REVERSAL','MANUAL_ADJUSTMENT')`),
+  validEvent: check('loyalty_ledger_event_type_valid', sql`${t.eventType} IN ('SALE_EARN','RETURN_REVERSAL','SALE_CANCELLATION_REVERSAL','MANUAL_ADJUSTMENT')`),
 }));
 
 export const expenses = pgTable('expenses', {
