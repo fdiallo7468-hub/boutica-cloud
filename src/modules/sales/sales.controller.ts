@@ -8,6 +8,7 @@ import { Tenant } from '../auth/tenant.type';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { ListSalesQueryDto } from './dto/list-sales-query.dto';
 import { CreateSaleUseCase } from './application/create-sale.usecase';
+import { CancelSaleUseCase } from './application/cancel-sale.usecase';
 
 @ApiTags('sales')
 @Controller('api/v1/sales')
@@ -15,6 +16,7 @@ export class SalesController {
   constructor(
     private readonly createSale: CreateSaleUseCase,
     private readonly db: DatabaseService,
+    private readonly cancelSale: CancelSaleUseCase,
   ) {}
 
   @Post()
@@ -22,6 +24,12 @@ export class SalesController {
   async create(@CurrentTenant() tenant: Tenant, @Body() body: CreateSaleDto, @Headers('idempotency-key') idempotencyKey?: string) {
     const { body: sale } = await this.createSale.execute(tenant, body, idempotencyKey);
     return sale;
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(HttpStatus.OK)
+  async cancel(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) id: string) {
+    return this.cancelSale.execute(tenant, id);
   }
 
   // NEW (v2.1, client-integration audit P0 §5): sales could be created but
