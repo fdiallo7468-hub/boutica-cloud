@@ -23,7 +23,9 @@ export class ReportsController {
     const now = new Date();
     const from = query.from ? new Date(query.from) : new Date(now.getFullYear(), now.getMonth(), 1);
     const to = query.to ? new Date(query.to) : now;
-    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) {\n      throw new BadRequestException('Invalid reporting date range');\n    }\n    const businessId = tenant.businessId;\n    const duration = Math.max(to.getTime() - from.getTime(), 1);\n    const previousTo = new Date(from.getTime() - 1);\n    const previousFrom = new Date(previousTo.getTime() - duration);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) {
+      throw new BadRequestException('Invalid reporting date range');
+    }\n    const businessId = tenant.businessId;\n    const duration = Math.max(to.getTime() - from.getTime(), 1);\n    const previousTo = new Date(from.getTime() - 1);\n    const previousFrom = new Date(previousTo.getTime() - duration);
 
     const completedSalesInRange = and(
       eq(sales.businessId, businessId),
