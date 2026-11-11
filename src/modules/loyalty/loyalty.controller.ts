@@ -4,6 +4,7 @@ import { DatabaseService } from '../../infrastructure/database/database';
 import { customers, loyaltyConfigurations, loyaltyLedger } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { Tenant } from '../auth/tenant.type';
+import { UpdateLoyaltyConfigDto } from './dto/update-loyalty-config.dto';
 
 @Controller('api/v1/loyalty')
 export class LoyaltyController {
@@ -22,7 +23,7 @@ export class LoyaltyController {
   @Put('configuration')
   async updateConfiguration(
     @CurrentTenant() tenant: Tenant,
-    @Body() body: { enabled?: boolean; earnPointsPer1000?: number; pointValue?: number; minimumRedemptionPoints?: number; expiryDays?: number | null },
+    @Body() body: UpdateLoyaltyConfigDto,
   ) {
     if (body.earnPointsPer1000 !== undefined && (!Number.isInteger(body.earnPointsPer1000) || body.earnPointsPer1000 < 0)) {
       throw new BadRequestException('earnPointsPer1000 must be a non-negative integer');
