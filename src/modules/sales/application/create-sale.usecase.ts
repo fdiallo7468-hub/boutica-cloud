@@ -12,6 +12,7 @@ import { CreateSaleDto } from '../dto/create-sale.dto';
 import { NotificationOutboxService } from '../../notifications/notification-outbox.service';
 import { NOVU_EVENT_TYPES } from '../../notifications/novu.types';
 import { getStockNotificationTransitions } from '../../notifications/notification-events';
+import { LoyaltyLedgerService } from '../../loyalty/loyalty-ledger.service';
 
 const ENDPOINT = 'sales.create';
 
@@ -25,6 +26,7 @@ export class CreateSaleUseCase {
   constructor(
     private readonly db: DatabaseService,
     private readonly outboxService: NotificationOutboxService,
+    private readonly loyaltyLedger: LoyaltyLedgerService,
   ) {}
 
   async execute(tenant: Tenant, dto: CreateSaleDto, idempotencyKey: string | undefined): Promise<CreateSaleResult> {
@@ -210,6 +212,14 @@ export class CreateSaleUseCase {
           referenceId: saleId,
         });
       }
+
+      await this.loyaltyLedger.awardForSale(tx, {
+        businessId: tenant.businessId,
+        customerId: dto.customerId,
+        saleId,
+        actorUserId: tenant.userId,
+        total: total.toDecimalString(),
+      });
 
       const responseBody = { ...saleRow, items: itemRows };
 
