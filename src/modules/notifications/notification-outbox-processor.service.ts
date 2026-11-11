@@ -62,14 +62,14 @@ export class NotificationOutboxProcessor implements OnModuleInit, OnModuleDestro
     if (!event) return false;
 
     const heartbeat = setInterval(() => {
-      void this.refreshLock(event.id);
+      void this.refreshLock(event.id, event.businessId);
     }, LOCK_REFRESH_INTERVAL_MS);
     try {
       await this.delivery.deliver(event);
       await this.database.db
         .update(notificationOutbox)
         .set({ status: 'delivered', lockedAt: null, deliveredAt: new Date(), lastError: null })
-        .where(eq(notificationOutbox.id, event.id));
+        .where(and(eq(notificationOutbox.id, event.id), eq(notificationOutbox.businessId, event.businessId)));
     } catch (error: unknown) {
       const retryAt = new Date(Date.now() + getRetryDelay(event.attempts));
       await this.database.db
@@ -91,13 +91,14 @@ export class NotificationOutboxProcessor implements OnModuleInit, OnModuleDestro
     return true;
   }
 
-  private async refreshLock(eventId: string): Promise<void> {
+  private async refreshLock(eventId: string, businessId: string): Promise<void> {
     try {
       await this.database.db
         .update(notificationOutbox)
         .set({ lockedAt: new Date() })
         .where(and(
           eq(notificationOutbox.id, eventId),
+          eq(notificationOutbox.businessId, businessId),
           eq(notificationOutbox.status, 'processing'),
         ));
     } catch (error: unknown) {
@@ -127,7 +128,7 @@ export class NotificationOutboxProcessor implements OnModuleInit, OnModuleDestro
       const [claimed] = await tx
         .update(notificationOutbox)
         .set({ status: 'processing', attempts: row.attempts + 1, lockedAt: now })
-        .where(eq(notificationOutbox.id, row.id))
+        .where(and(eq(notificationOutbox.id, row.id), eq(notificationOutbox.businessId, row.businessId)))
         .returning();
       if (!claimed) return undefined;
 
