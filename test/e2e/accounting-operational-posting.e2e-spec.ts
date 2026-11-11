@@ -105,6 +105,7 @@ describe('Accounting operational posting (e2e)', () => {
     const [supplier] = await app.get(DatabaseService).db.insert(suppliers).values({
       businessId, name: 'Fournisseur auxiliaire',
     }).returning();
+    if (!supplier) throw new Error('Supplier auxiliary fixture could not be created');
     const supplierAccount = await request(app.getHttpServer()).post('/api/v1/accounting/accounts').set(auth)
       .send({ accountNumber: '401', label: 'Fournisseurs', class: 4, normalBalance: 'CREDIT', isPostable: true }).expect(201);
     const supplierOpening = await request(app.getHttpServer()).post('/api/v1/accounting/opening-balances').set(auth)
