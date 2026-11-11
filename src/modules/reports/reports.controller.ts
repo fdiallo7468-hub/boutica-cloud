@@ -41,6 +41,8 @@ export class ReportsController {
       topProducts,
       lowStock,
       receivablesRows,
+      salesKpis,
+      previousRevenueRows,
     ] = await Promise.all([
       this.db.db
         .select({ revenue: sql<string>`coalesce(sum(${sales.total}), 0)` })
@@ -99,6 +101,10 @@ export class ReportsController {
         })
         .from(receivables)
         .where(and(eq(receivables.businessId, businessId), ne(receivables.status, 'PAID'), ne(receivables.status, 'CANCELLED'))),
+      this.db.db.select({ completedSalesCount: count(), averageBasket: sql<string>`coalesce(round(avg(${sales.total}), 2), 0)::text` })
+        .from(sales).where(completedSalesInRange),
+      this.db.db.select({ revenue: sql<string>`coalesce(sum(${sales.total}), 0)::text` })
+        .from(sales).where(and(eq(sales.businessId, businessId), eq(sales.status, 'COMPLETED'), gte(sales.createdAt, previousFrom), lte(sales.createdAt, previousTo))),
     ]);
 
     const revenue = revenueRows[0]?.revenue ?? '0.00';
@@ -110,6 +116,9 @@ export class ReportsController {
     return {
       period: { from: from.toISOString(), to: to.toISOString() },
       revenue,
+      completedSalesCount: salesKpis[0]?.completedSalesCount ?? 0,
+      averageBasket: salesKpis[0]?.averageBasket ?? '0.00',
+      previousPeriod: { from: previousFrom.toISOString(), to: previousTo.toISOString(), revenue: previousRevenueRows[0]?.revenue ?? '0.00' },
       expensesTotal,
       estimatedProfit: ((toMinorUnits(grossMargin) - toMinorUnits(expensesTotal)) / 100).toFixed(2),
       stockValue,
