@@ -20,7 +20,7 @@ export class HealthController {
       throw new ServiceUnavailableException({
         status: 'error',
         service: 'boutica-backend',
-        version: '2.1.0',
+        version: '3.0.0',
         database: 'disconnected',
         timestamp: new Date().toISOString(),
       });
@@ -29,7 +29,7 @@ export class HealthController {
     return {
       status: 'ok',
       service: 'boutica-backend',
-      version: '2.1.0',
+      version: '3.0.0',
       database: 'connected',
       timestamp: new Date().toISOString(),
     };
