@@ -10,11 +10,12 @@ import { Money } from '../../common/domain';
 import { PaginationQueryDto } from '../../common/pagination.dto';
 import { Expense } from './domain/expense';
 import { CreateExpenseDto } from './dto/create-expense.dto';
+import { AccountingOperationalPostingService } from '../accounting/accounting-operational-posting.service';
 
 @ApiTags('expenses')
 @Controller('api/v1/expenses')
 export class ExpensesController {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(private readonly db: DatabaseService, private readonly accountingPosting: AccountingOperationalPostingService) {}
 
   // ROUND 2 FIX: this module had a POST but no way to ever list what had
   // been recorded — the brief is explicit that expenses need to be
@@ -46,16 +47,17 @@ export class ExpensesController {
     if (!location) throw new NotFoundException('Aucune localisation active par défaut n’est configurée');
     const expense = Expense.create(randomUUID(), tenant.businessId, body.category, amount, body.description);
 
-    const [row] = await this.db.db
-      .insert(expenses)
-      .values({
+    return this.db.db.transaction(async (tx) => {
+      const [row] = await tx.insert(expenses).values({
         businessId: expense.businessId,
         locationId: location.id,
         category: expense.category,
         amount: expense.amount.toDecimalString(),
         description: expense.description,
-      })
-      .returning();
-    return row;
+      }).returning();
+      if (!row) throw new NotFoundException('La dépense n’a pas pu être enregistrée');
+      const accounting = await this.accountingPosting.postExpense(tx, tenant, row);
+      return { ...row, accounting };
+    });
   }
 }
