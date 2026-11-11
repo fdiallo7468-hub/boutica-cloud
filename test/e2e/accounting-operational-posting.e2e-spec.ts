@@ -1,5 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { DatabaseService } from '../../src/infrastructure/database/database';
 import { createTestApp, registerBusiness, resetDatabase } from '../utils/test-app';
 
 describe('Accounting operational posting (e2e)', () => {
@@ -10,7 +11,7 @@ describe('Accounting operational posting (e2e)', () => {
     app = setup.app;
   });
 
-  beforeEach(async () => resetDatabase(app.get('DatabaseService')));
+  beforeEach(async () => resetDatabase(app.get(DatabaseService)));
 
   afterAll(async () => {
     await app.close();
