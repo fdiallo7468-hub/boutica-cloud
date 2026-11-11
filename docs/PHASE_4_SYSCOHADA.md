@@ -50,7 +50,7 @@ Routes ajoutées :
 - `PATCH /api/v1/accounting/accounts/:accountId`
 - `PATCH /api/v1/accounting/journals/:journalId`
 
-Les contrôles de chevauchement des exercices fiscaux, de hiérarchie des comptes et les transitions de périodes devront être couverts par des tests PostgreSQL dédiés avant de considérer 4.1 comme entièrement close.
+Les tests PostgreSQL couvrent les chevauchements d'exercices et de périodes, la hiérarchie parent/enfant des comptes et les transitions OPEN → CLOSED → LOCKED. La création concurrente des exercices et les transitions de périodes sont sérialisées au niveau PostgreSQL.
 
 ## Phase 4.1 — premier schéma
 
@@ -94,8 +94,8 @@ Routes :
 
 Migration `0019_accounting_auxiliary_ledgers.sql` ajoute les références clients/fournisseurs sur les lignes comptables, protégées par clés étrangères composites et contrainte empêchant d'affecter deux tiers à une même ligne. Les écritures de brouillon sont exclues des grands livres et de la balance.
 
-La balance et le grand livre doivent recevoir des tests de réconciliation PostgreSQL dédiés. Le développement restant de 4.4 porte exclusivement sur les auxiliaires clients/fournisseurs, les soldes d'ouverture et les tests d'acceptation associés.
+Les tests PostgreSQL de 4.4 vérifient la réconciliation de la balance (débit = crédit), les mouvements du grand livre, les auxiliaires clients et fournisseurs, le rejet des références auxiliaires inter-entreprises, l'idempotence des soldes d'ouverture et la possibilité de plusieurs sources d'ouverture sur une même date. Les tests du moteur couvrent également l'idempotence, le rejet d'une réutilisation de clé avec un autre contenu, l'extourne unique et l'immutabilité des écritures comptabilisées.
 
 ## État de validation
 
-La Phase 4.3 est close. La Phase 4.4 est la dernière étape de cette Phase 4 ; aucune étape 4.5 ou 4.6 ne doit être ajoutée. Le statut CI doit être vérifié sur le dernier SHA de la PR après chaque série de commits. Aucune conformité SYSCOHADA réglementaire n'est revendiquée sans revue professionnelle.
+La Phase 4.3 est close. La Phase 4.4 est la dernière étape de cette Phase 4 ; aucune étape 4.5 ou 4.6 ne doit être ajoutée. Les scénarios d'acceptation PostgreSQL 4.1, 4.2 et 4.4 sont intégrés ; la clôture technique dépend du passage complet de la CI sur le dernier SHA de la PR et de la revue finale des résultats. Aucune conformité SYSCOHADA réglementaire n'est revendiquée sans revue professionnelle.
