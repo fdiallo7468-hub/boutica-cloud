@@ -26,6 +26,7 @@ import { BusinessModule } from './modules/business/business.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { SyncModule } from './modules/sync/sync.module';
+import { LoyaltyModule } from './modules/loyalty/loyalty.module';
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { SyncModule } from './modules/sync/sync.module';
     NotificationsModule,
     FinanceModule,
     SyncModule,
+    LoyaltyModule,
     StorageModule,
     SecurityModule,
   ],
