@@ -255,7 +255,7 @@ describe('Sales (e2e)', () => {
         customerId: customer.body.id,
         completedSalesCount: 1,
         lifetimeValue: '50.00',
-        averageBasket: '50.0000000000000000',
+        averageBasket: '50.00',
       });
       expect(summary.body.lastPurchaseAt).toBeTruthy();
     });
