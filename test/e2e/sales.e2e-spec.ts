@@ -70,7 +70,10 @@ describe('Sales (e2e)', () => {
     const retry = await request(app.getHttpServer())
       .post(`/api/v1/sales/${sale.body.id}/cancel`).set('Authorization', `Bearer ${accessToken}`).expect(200);
     expect(retry.body.alreadyCancelled).toBe(true);
-    expect(after.body.ledger).toHaveLength(2);
+    const afterRetry = await request(app.getHttpServer())
+      .get(`/api/v1/loyalty/customers/${customer.body.id}`).set('Authorization', `Bearer ${accessToken}`).expect(200);
+    expect(afterRetry.body.pointsBalance).toBe(0);
+    expect(afterRetry.body.ledger).toHaveLength(2);
   });
 
   it('rejects a sale when requested quantity exceeds available stock', async () => {
