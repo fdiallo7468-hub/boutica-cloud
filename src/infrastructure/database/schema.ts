@@ -404,7 +404,7 @@ export const customers = pgTable('customers', {
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
+}, (t) => ({ businessIdIdUnique: uniqueIndex('customers_business_id_id_unique').on(t.businessId, t.id) }));
 
 export const sales = pgTable(
   'sales',
@@ -465,7 +465,7 @@ export const loyaltyLedger = pgTable('loyalty_ledger', {
   id: uuid('id').defaultRandom().primaryKey(),
   businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'restrict' }),
   customerId: uuid('customer_id').notNull().references(() => customers.id, { onDelete: 'restrict' }),
-  actorUserId: text('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
+  actorUserId: text('actor_user_id'),
   pointsDelta: integer('points_delta').notNull(),
   eventType: text('event_type').notNull(),
   sourceId: uuid('source_id').notNull(),
