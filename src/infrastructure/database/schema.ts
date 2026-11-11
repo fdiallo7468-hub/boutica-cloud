@@ -929,3 +929,31 @@ export const accountingEntryLines = pgTable(
     amountsCheck: check('accounting_entry_lines_amounts_check', sql`${t.debit} >= 0 AND ${t.credit} >= 0 AND ((${t.debit} > 0 AND ${t.credit} = 0) OR (${t.credit} > 0 AND ${t.debit} = 0))`),
   }),
 );
+
+
+/** Explicit, tenant-owned posting rules for operational accounting events. */
+export const accountingEventMappings = pgTable(
+  'accounting_event_mappings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull(),
+    sourceType: text('source_type').notNull(),
+    sourceCategory: text('source_category').notNull(),
+    journalId: uuid('journal_id').notNull(),
+    debitAccountId: uuid('debit_account_id').notNull(),
+    creditAccountId: uuid('credit_account_id').notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessCategoryUnique: uniqueIndex('accounting_event_mappings_business_category_unique').on(t.businessId, t.sourceType, t.sourceCategory),
+    businessIdIdUnique: uniqueIndex('accounting_event_mappings_business_id_id_unique').on(t.businessId, t.id),
+    journalFk: foreignKey({ name: 'accounting_event_mappings_journal_fk', columns: [t.businessId, t.journalId], foreignColumns: [accountingJournals.businessId, accountingJournals.id] }),
+    debitAccountFk: foreignKey({ name: 'accounting_event_mappings_debit_account_fk', columns: [t.businessId, t.debitAccountId], foreignColumns: [accountingAccounts.businessId, accountingAccounts.id] }),
+    creditAccountFk: foreignKey({ name: 'accounting_event_mappings_credit_account_fk', columns: [t.businessId, t.creditAccountId], foreignColumns: [accountingAccounts.businessId, accountingAccounts.id] }),
+    distinctAccounts: check('accounting_event_mappings_distinct_accounts_check', sql`${t.debitAccountId} <> ${t.creditAccountId}`),
+    sourceTypeCheck: check('accounting_event_mappings_source_type_check', sql`${t.sourceType} IN ('EXPENSE')`),
+    categoryCheck: check('accounting_event_mappings_category_check', sql`length(btrim(${t.sourceCategory})) BETWEEN 1 AND 80`),
+  }),
+);
