@@ -80,7 +80,11 @@ export class NotificationOutboxProcessor implements OnModuleInit, OnModuleDestro
           lockedAt: null,
           lastError: error instanceof Error ? error.name.slice(0, 100) : 'UnknownError',
         })
-        .where(eq(notificationOutbox.id, event.id));
+        .where(and(
+          eq(notificationOutbox.id, event.id),
+          eq(notificationOutbox.businessId, event.businessId),
+          eq(notificationOutbox.status, 'processing'),
+        ));
       this.logger.error(
         `Notification ${event.id} (${event.eventType}) failed; retry scheduled for ${retryAt.toISOString()}.`,
         error instanceof Error ? error.stack : String(error),
