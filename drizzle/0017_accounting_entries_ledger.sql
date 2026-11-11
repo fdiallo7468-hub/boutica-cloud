@@ -75,7 +75,7 @@ CREATE INDEX accounting_entry_lines_business_account_idx
 CREATE FUNCTION public.reject_posted_accounting_entry_mutation() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE target_business_id uuid;
-DECLARE target_entry_id uuid;
+DECLARE target_status text;
 BEGIN
   IF TG_TABLE_NAME = 'accounting_entries' THEN
     IF TG_OP = 'INSERT' THEN
@@ -93,10 +93,10 @@ BEGIN
   -- For entry lines, protect both the old and new parent on UPDATE so a
   -- line cannot be moved out of a posted entry into a draft entry.
   IF TG_OP IN ('UPDATE', 'DELETE') THEN
-    SELECT status INTO STRICT target_entry_id
+    SELECT status INTO STRICT target_status
     FROM public.accounting_entries
     WHERE business_id = OLD.business_id AND id = OLD.entry_id;
-    IF target_entry_id::text = 'POSTED' THEN
+    IF target_status = 'POSTED' THEN
       RAISE EXCEPTION 'Lines of a posted accounting entry are immutable';
     END IF;
   END IF;
