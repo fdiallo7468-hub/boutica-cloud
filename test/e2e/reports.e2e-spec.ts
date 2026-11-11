@@ -54,6 +54,25 @@ describe('Reports (e2e)', () => {
     expect(res.body.timeSeries[0]).toMatchObject({ revenue: '100.00', completedSalesCount: 1 });
   });
 
+  it('subtracts sale discounts from the gross-margin estimate', async () => {
+    const { accessToken } = await registerBusiness(app);
+    const { variantId } = await createProductWithVariant(app, accessToken, { purchasePrice: 15, sellingPrice: 25 });
+    await adjustStock(app, accessToken, variantId, 10);
+    await request(app.getHttpServer())
+      .post('/api/v1/sales')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ items: [{ variantId, quantity: 4 }], discount: 10 })
+      .expect(201);
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/reports/dashboard')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    expect(res.body.revenue).toBe('90.00');
+    expect(res.body.discountsTotal).toBe('10.00');
+    expect(res.body.grossMarginEstimate).toBe('30.00');
+    expect(res.body.estimatedProfitIsEstimate).toBe(true);
+  });
+
   it('flags a variant as low stock once it drops to or below the threshold', async () => {
     const { accessToken } = await registerBusiness(app);
     const { variantId } = await createProductWithVariant(app, accessToken, { sellingPrice: 10 });
