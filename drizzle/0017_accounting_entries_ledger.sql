@@ -73,10 +73,18 @@ LANGUAGE plpgsql AS $$
 DECLARE target_business_id uuid;
 DECLARE target_entry_id uuid;
 BEGIN
-  target_business_id := COALESCE(OLD.business_id, NEW.business_id);
-  target_entry_id := COALESCE(OLD.id, NEW.id);
-  IF TG_TABLE_NAME = 'accounting_entry_lines' THEN
-    target_entry_id := COALESCE(OLD.entry_id, NEW.entry_id);
+  IF TG_OP = 'DELETE' THEN
+    target_business_id := OLD.business_id;
+    target_entry_id := OLD.id;
+    IF TG_TABLE_NAME = 'accounting_entry_lines' THEN
+      target_entry_id := OLD.entry_id;
+    END IF;
+  ELSE
+    target_business_id := NEW.business_id;
+    target_entry_id := NEW.id;
+    IF TG_TABLE_NAME = 'accounting_entry_lines' THEN
+      target_entry_id := NEW.entry_id;
+    END IF;
   END IF;
   IF EXISTS (
     SELECT 1 FROM public.accounting_entries e
@@ -84,7 +92,8 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'Posted accounting entries are immutable; create a reversal entry';
   END IF;
-  RETURN COALESCE(NEW, OLD);
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
 END;
 $$;
 CREATE TRIGGER accounting_entries_append_only
