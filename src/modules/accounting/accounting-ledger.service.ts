@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
+import { accountingAmountToMinorUnits, minorUnitsToAccountingAmount } from './accounting-money';
 import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
 import {
@@ -38,18 +39,6 @@ function dateOnly(value: string): string {
   return value;
 }
 
-function cents(value: string | number | undefined, field: string): bigint {
-  const raw = value === undefined ? '0' : String(value);
-  if (!/^\d+(\.\d{1,2})?$/.test(raw)) throw new BadRequestException(`${field} must be a non-negative decimal with at most 2 decimals`);
-  const parts = raw.split('.');
-  const whole = parts[0] ?? '0';
-  const fraction = parts[1] ?? '';
-  return BigInt(whole) * 100n + BigInt((fraction + '00').slice(0, 2));
-}
-
-function decimal(value: bigint): string {
-  return `${value / 100n}.${String(value % 100n).padStart(2, '0')}`;
-}
 
 @Injectable()
 export class AccountingLedgerService {
@@ -69,8 +58,8 @@ export class AccountingLedgerService {
     if (input.sourceId && input.sourceId.length > 120) throw new BadRequestException('sourceId is too long');
 
     const normalized = input.lines.map((line, index) => {
-      const debit = cents(line.debit, `lines[${index}].debit`);
-      const credit = cents(line.credit, `lines[${index}].credit`);
+      const debit = accountingAmountToMinorUnits(line.debit, `lines[${index}].debit`);
+      const credit = accountingAmountToMinorUnits(line.credit, `lines[${index}].credit`);
       if ((debit > 0n) === (credit > 0n)) {
         throw new BadRequestException(`Line ${index + 1} must contain either a debit or a credit, not both`);
       }
@@ -164,8 +153,8 @@ export class AccountingLedgerService {
         lineNumber: index + 1,
         accountId: line.accountId,
         description: line.description,
-        debit: decimal(line.debit),
-        credit: decimal(line.credit),
+        debit: minorUnitsToAccountingAmount(line.debit),
+        credit: minorUnitsToAccountingAmount(line.credit),
       })));
       await tx.update(accountingEntries).set({ status: 'POSTED' }).where(and(
         eq(accountingEntries.id, entry.id), eq(accountingEntries.businessId, tenant.businessId),
@@ -269,9 +258,9 @@ export class AccountingLedgerService {
       .orderBy(asc(accountingEntries.entryDate), asc(accountingEntries.entryNumber), asc(accountingEntryLines.lineNumber));
     let debit = 0n, credit = 0n;
     return rows.map((row) => {
-      debit += cents(row.debit, 'debit');
-      credit += cents(row.credit, 'credit');
-      return { ...row, runningDebit: decimal(debit), runningCredit: decimal(credit), balance: decimal(debit - credit) };
+      debit += accountingAmountToMinorUnits(row.debit, 'debit');
+      credit += accountingAmountToMinorUnits(row.credit, 'credit');
+      return { ...row, runningDebit: minorUnitsToAccountingAmount(debit), runningCredit: minorUnitsToAccountingAmount(credit), balance: minorUnitsToAccountingAmount(debit - credit) };
     });
   }
 
