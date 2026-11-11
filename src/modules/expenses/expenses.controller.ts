@@ -3,6 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 import { randomUUID } from 'node:crypto';
 import { and, count, desc, eq } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
+import { AuditEventsService } from '../../infrastructure/database/audit-events.service';
 import { businesses, businessLocations, expenses } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { Tenant } from '../auth/tenant.type';
@@ -15,7 +16,11 @@ import { AccountingOperationalPostingService } from '../accounting/accounting-op
 @ApiTags('expenses')
 @Controller('api/v1/expenses')
 export class ExpensesController {
-  constructor(private readonly db: DatabaseService, private readonly accountingPosting: AccountingOperationalPostingService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly accountingPosting: AccountingOperationalPostingService,
+    private readonly auditEvents: AuditEventsService = new AuditEventsService(),
+  ) {}
 
   // ROUND 2 FIX: this module had a POST but no way to ever list what had
   // been recorded — the brief is explicit that expenses need to be
@@ -57,6 +62,15 @@ export class ExpensesController {
       }).returning();
       if (!row) throw new NotFoundException('La dépense n’a pas pu être enregistrée');
       const accounting = await this.accountingPosting.postExpense(tx, tenant, row);
+      await this.auditEvents.appendInTransaction(tx, {
+        businessId: tenant.businessId,
+        actorUserId: tenant.userId,
+        locationId: location.id,
+        action: 'expense.created',
+        resourceType: 'expense',
+        resourceId: row.id,
+        metadata: { amount: row.amount, category: row.category, currency: business?.currency ?? 'XOF' },
+      });
       return { ...row, accounting };
     });
   }
