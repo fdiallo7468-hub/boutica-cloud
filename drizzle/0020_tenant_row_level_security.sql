@@ -61,7 +61,14 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public, pg_temp
 AS $$
 BEGIN
-  IF p_pending_status NOT IN ('pending', 'PENDING')
+  IF p_stale_before IS NULL OR p_stale_before > clock_timestamp() THEN
+    RAISE EXCEPTION 'Notification outbox stale-lock cutoff must not be in the future'
+      USING ERRCODE = '22023';
+  END IF;
+
+  IF p_pending_status IS NULL
+     OR p_processing_status IS NULL
+     OR p_pending_status NOT IN ('pending', 'PENDING')
      OR p_processing_status NOT IN ('processing', 'PROCESSING')
      OR NOT (
        (p_pending_status = 'pending' AND p_processing_status = 'processing')
