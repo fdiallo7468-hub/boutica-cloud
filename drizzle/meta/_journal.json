@@ -134,6 +134,13 @@
       "when": 1794392000000,
       "tag": "0018_accounting_operational_mappings",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794393000000,
+      "tag": "0019_accounting_auxiliary_ledgers",
+      "breakpoints": true
     }
   ]
 }
