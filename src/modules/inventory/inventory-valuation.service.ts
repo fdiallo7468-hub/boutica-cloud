@@ -11,7 +11,7 @@ import { inventoryValuations, stock } from '../../infrastructure/database/schema
 export class InventoryValuationService {
   private toMinorUnits(value: string | number, field: string): bigint {
     const raw = String(value);
-    if (!/^\\d+(?:\\.\\d{1,2})?$/.test(raw)) {
+    if (!/^\d+(?:\.\d{1,2})?$/.test(raw)) {
       throw new ConflictException(`${field} must be a non-negative decimal with at most 2 decimals`);
     }
     const [whole = '0', fraction = ''] = raw.split('.');
