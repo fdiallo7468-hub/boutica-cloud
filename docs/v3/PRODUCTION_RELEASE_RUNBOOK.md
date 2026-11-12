@@ -1,7 +1,9 @@
 # Boutica Cloud 3.0 — Production release runbook
 
-**Target:** Render workspace Fluo + Neon project `boutica`  
+**Status:** historical infrastructure snapshot only — not an approved release target.  
 **Release state:** preparation only; production migration, PR merge and deploy are not authorized by this document.
+
+> **Cession requirement:** the Render and Neon resources listed below belong to the current development environment and must not be treated as the buyer's production infrastructure. Before merging to `main`, disable or detach any legacy auto-deploy path that could deploy this PR to the current Render service. The buyer must provision and own replacement hosting, PostgreSQL, storage, secrets, domains and CI/CD.
 
 ## 1. Current infrastructure baseline (observed 2026-11-11)
 
