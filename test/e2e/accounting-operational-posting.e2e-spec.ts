@@ -126,6 +126,106 @@ describe('Accounting operational posting (e2e)', () => {
     expect(trialBalance.body.totals).toMatchObject({ debit: '280.00', credit: '280.00', balanced: true });
   });
 
+  it('posts purchases, settlements and returns and reverses a cancelled payment atomically', async () => {
+    const { accessToken } = await registerBusiness(app, 'Accounting operational events');
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const year = new Date().getUTCFullYear();
+    const startDate = `${year}-01-01`;
+    const endDate = `${year}-12-31`;
+    await request(app.getHttpServer()).put('/api/v1/accounting/profile').set(auth).send({}).expect(200);
+    const fiscalYear = await request(app.getHttpServer()).post('/api/v1/accounting/fiscal-years').set(auth)
+      .send({ code: `FY-${year}`, label: `Exercice ${year}`, startDate, endDate }).expect(201);
+    await request(app.getHttpServer()).post('/api/v1/accounting/periods').set(auth)
+      .send({ fiscalYearId: fiscalYear.body.id, code: `P-${year}`, label: `Période ${year}`, startDate, endDate }).expect(201);
+
+    const purchaseJournal = await request(app.getHttpServer()).post('/api/v1/accounting/journals').set(auth)
+      .send({ code: 'ACH', label: 'Journal des achats', journalType: 'PURCHASE', sequencePrefix: 'ACH-' }).expect(201);
+    const salesJournal = await request(app.getHttpServer()).post('/api/v1/accounting/journals').set(auth)
+      .send({ code: 'VTE', label: 'Journal des ventes', journalType: 'SALES', sequencePrefix: 'VTE-' }).expect(201);
+    const cashJournal = await request(app.getHttpServer()).post('/api/v1/accounting/journals').set(auth)
+      .send({ code: 'CAI', label: 'Journal de caisse', journalType: 'CASH', sequencePrefix: 'CAI-' }).expect(201);
+
+    const inventoryAccount = await request(app.getHttpServer()).post('/api/v1/accounting/accounts').set(auth)
+      .send({ accountNumber: '31', label: 'Stocks', class: 3, normalBalance: 'DEBIT', isPostable: true }).expect(201);
+    const supplierAccount = await request(app.getHttpServer()).post('/api/v1/accounting/accounts').set(auth)
+      .send({ accountNumber: '401', label: 'Fournisseurs', class: 4, normalBalance: 'CREDIT', isPostable: true }).expect(201);
+    const customerAccount = await request(app.getHttpServer()).post('/api/v1/accounting/accounts').set(auth)
+      .send({ accountNumber: '411', label: 'Clients', class: 4, normalBalance: 'DEBIT', isPostable: true }).expect(201);
+    const cashAccount = await request(app.getHttpServer()).post('/api/v1/accounting/accounts').set(auth)
+      .send({ accountNumber: '571', label: 'Caisse', class: 5, normalBalance: 'DEBIT', isPostable: true }).expect(201);
+    const revenueAccount = await request(app.getHttpServer()).post('/api/v1/accounting/accounts').set(auth)
+      .send({ accountNumber: '701', label: 'Ventes', class: 7, normalBalance: 'CREDIT', isPostable: true }).expect(201);
+    const cogsAccount = await request(app.getHttpServer()).post('/api/v1/accounting/accounts').set(auth)
+      .send({ accountNumber: '603', label: 'Coût des marchandises vendues', class: 6, normalBalance: 'DEBIT', isPostable: true }).expect(201);
+    const salesReturnAccount = await request(app.getHttpServer()).post('/api/v1/accounting/accounts').set(auth)
+      .send({ accountNumber: '709', label: 'Retours et rabais', class: 7, normalBalance: 'DEBIT', isPostable: true }).expect(201);
+
+    const supplier = await request(app.getHttpServer()).post('/api/v1/suppliers').set(auth)
+      .send({ name: 'Fournisseur test comptable' }).expect(201);
+    const customer = await request(app.getHttpServer()).post('/api/v1/customers').set(auth)
+      .send({ name: 'Client test comptable' }).expect(201);
+
+    await request(app.getHttpServer()).put('/api/v1/accounting/event-mappings/PURCHASE/default').set(auth).send({
+      journalId: purchaseJournal.body.id,
+      lines: [
+        { accountId: inventoryAccount.body.id, side: 'DEBIT', amountBasis: 'PURCHASE_TOTAL' },
+        { accountId: supplierAccount.body.id, side: 'CREDIT', amountBasis: 'PURCHASE_TOTAL', auxiliaryType: 'SUPPLIER' },
+      ],
+    }).expect(200);
+    await request(app.getHttpServer()).put('/api/v1/accounting/event-mappings/PAYMENT/cash:settlement').set(auth).send({
+      journalId: cashJournal.body.id,
+      lines: [
+        { accountId: cashAccount.body.id, side: 'DEBIT', amountBasis: 'PAYMENT_AMOUNT' },
+        { accountId: customerAccount.body.id, side: 'CREDIT', amountBasis: 'PAYMENT_AMOUNT', auxiliaryType: 'CUSTOMER' },
+      ],
+    }).expect(200);
+    await request(app.getHttpServer()).put('/api/v1/accounting/event-mappings/RETURN/default').set(auth).send({
+      journalId: salesJournal.body.id,
+      lines: [
+        { accountId: salesReturnAccount.body.id, side: 'DEBIT', amountBasis: 'RETURN_TOTAL' },
+        { accountId: customerAccount.body.id, side: 'CREDIT', amountBasis: 'RETURN_TOTAL', auxiliaryType: 'CUSTOMER' },
+        { accountId: inventoryAccount.body.id, side: 'DEBIT', amountBasis: 'RETURN_RESTOCK_COST' },
+        { accountId: cogsAccount.body.id, side: 'CREDIT', amountBasis: 'RETURN_RESTOCK_COST' },
+      ],
+    }).expect(200);
+
+    const { variantId } = await createProductWithVariant(app, accessToken, { sellingPrice: 100, purchasePrice: 40 });
+    const purchase = await request(app.getHttpServer()).post('/api/v1/purchases/receive').set(auth).send({
+      supplierId: supplier.body.id,
+      items: [{ variantId, quantity: 3, unitPrice: 30 }],
+    }).expect(201);
+    expect(purchase.body).toMatchObject({ total: '90.00', accounting: { status: 'POSTED' } });
+
+    const sale = await request(app.getHttpServer()).post('/api/v1/sales').set(auth).send({
+      customerId: customer.body.id,
+      items: [{ variantId, quantity: 2 }],
+    }).expect(201);
+    expect(sale.body.accounting.status).toBe('NOT_CONFIGURED'); // sale mapping is deliberately not configured in this scenario
+
+    const payment = await request(app.getHttpServer()).post('/api/v1/payments').set(auth).send({
+      customerId: customer.body.id,
+      saleId: sale.body.id,
+      amount: 50,
+      paymentMethod: 'CASH',
+    }).expect(201);
+    expect(payment.body.accounting).toMatchObject({ status: 'POSTED' });
+
+    const cancelledPayment = await request(app.getHttpServer()).post(`/api/v1/payments/${payment.body.id}/cancel`).set(auth)
+      .send({ reason: 'Annulation de test' }).expect(200);
+    expect(cancelledPayment.body.accounting).toMatchObject({ status: 'REVERSED' });
+
+    const returned = await request(app.getHttpServer()).post('/api/v1/returns').set(auth).send({
+      saleId: sale.body.id,
+      items: [{ saleItemId: sale.body.items[0].id, quantity: 1, condition: 'RESTOCK' }],
+      reason: 'Retour de test',
+    }).expect(201);
+    expect(returned.body).toMatchObject({ total: '100.00', accounting: { status: 'POSTED' } });
+
+    const trialBalance = await request(app.getHttpServer()).get('/api/v1/accounting/trial-balance').set(auth).expect(200);
+    expect(trialBalance.body.totals.debit).toBe(trialBalance.body.totals.credit);
+    expect(trialBalance.body.totals.balanced).toBe(true);
+  });
+
   it('reconciles opening balances, customer/supplier auxiliaries and the trial balance', async () => {
     const { accessToken, businessId } = await registerBusiness(app, 'Accounting opening balance');
     const auth = { Authorization: `Bearer ${accessToken}` };
