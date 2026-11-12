@@ -1,3 +1,5 @@
+import { PERMISSIONS } from '../auth/permissions/permission-catalog';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import {
   Body,
   Controller,
@@ -27,6 +29,7 @@ export class FinanceController {
   /**
    * Enregistre un paiement (intégral, acompte ou versement différé).
    */
+  @RequirePermissions(PERMISSIONS.PAYMENTS_MANAGE)
   @Post('payments')
   @HttpCode(HttpStatus.CREATED)
   async recordPayment(
@@ -39,6 +42,7 @@ export class FinanceController {
   /**
    * Liste les paiements de l'entreprise connectée.
    */
+  @RequirePermissions(PERMISSIONS.PAYMENTS_READ)
   @Get('payments')
   async listPayments(
     @CurrentTenant() tenant: Tenant,
@@ -60,6 +64,7 @@ export class FinanceController {
   /**
    * Récupère le reçu complet d'un paiement (pour ticket 80mm ou PDF).
    */
+  @RequirePermissions(PERMISSIONS.PAYMENTS_READ)
   @Get('payments/:id/receipt')
   async getPaymentReceipt(
     @CurrentTenant() tenant: Tenant,
@@ -71,6 +76,7 @@ export class FinanceController {
   /**
    * Annule un paiement avec traçabilité et réajustement de la créance.
    */
+  @RequirePermissions(PERMISSIONS.PAYMENTS_MANAGE)
   @Post('payments/:id/cancel')
   @HttpCode(HttpStatus.OK)
   async cancelPayment(
@@ -84,6 +90,7 @@ export class FinanceController {
   /**
    * Crée une créance client rattachée à une vente (mode partiel ou différé).
    */
+  @RequirePermissions(PERMISSIONS.FINANCE_MANAGE)
   @Post('receivables')
   @HttpCode(HttpStatus.CREATED)
   async createReceivable(
@@ -96,6 +103,7 @@ export class FinanceController {
   /**
    * Liste les créances clients avec statut dynamique (y compris détection OVERDUE).
    */
+  @RequirePermissions(PERMISSIONS.PAYMENTS_READ)
   @Get('receivables')
   async listReceivables(
     @CurrentTenant() tenant: Tenant,
@@ -117,6 +125,7 @@ export class FinanceController {
   /**
    * Détail d'une créance avec historique de tous ses versements.
    */
+  @RequirePermissions(PERMISSIONS.PAYMENTS_READ)
   @Get('receivables/:id')
   async getReceivableDetail(
     @CurrentTenant() tenant: Tenant,
