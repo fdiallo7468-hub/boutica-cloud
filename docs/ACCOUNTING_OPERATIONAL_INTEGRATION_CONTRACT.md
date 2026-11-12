@@ -31,10 +31,10 @@ The ledger engine supports balanced entries with 2–200 lines, source reference
 |---|---|---|---|
 | Sale completed | Sale subtotal, discount, net total, item quantities, sale-time cost snapshots, customer, location | Receivable/revenue/discount plus cost-of-sales/inventory lines | Implemented with tenant-configured multi-line templates; tax treatment is not modelled |
 | Purchase received | Purchase total, item quantities/prices, optional supplier, location | Inventory/expense and supplier or clearing counterpart | Implemented with an explicit multi-line template; supplier auxiliary is optional; tax/freight/discount treatment is not modelled |
-| Payment confirmed | Amount, payment method, customer, optional sale/receivable | Treasury account against receivable, advance, or other applicable account | Implemented with a tenant mapping per payment-method and settlement context; exact cash/bank accounts remain business-configured |
+| Customer payment confirmed | Amount, payment method, customer, optional sale/receivable | Treasury account against receivable, advance, or other applicable account | Implemented with a tenant mapping per payment-method and settlement context; exact cash/bank accounts remain business-configured. Supplier disbursements are not present in the current finance domain |
 | Payment cancelled | Original payment and cancellation record | Reverse the original payment entry exactly once | Implemented atomically using the source entry and an open reversal period |
 | Receivable created | Sale/customer/initial amount/paid amount | Must not duplicate the sale entry; an initial payment must be stored as a payment event | Implemented: positive initial settlement requires a payment method and creates a real payment within the receivable transaction |
-| Return completed | Return total, sale items, returned quantity, RESTOCK/DAMAGED condition, original cost snapshots | Sales return/credit note plus inventory/COGS reversal where physically restocked | Configurable multi-line posting implemented; no cash refund or receivable adjustment is executed by the current return workflow |
+| Return completed | Return total, sale items, returned quantity, RESTOCK/DAMAGED condition, original cost snapshots, original sale discount | Sales return/credit note plus inventory/COGS reversal where physically restocked | Configurable multi-line posting implemented for non-discounted sales; discounted returns are blocked until a discount-allocation policy exists. No cash refund or receivable adjustment is executed by the current return workflow |
 | Sale cancelled | Original sale, items, restored stock; cancellation is blocked after completed returns or confirmed payments | Reverse the original sale and cost-of-sales entries | Implemented atomically using the source entry and an open reversal period |
 | Stock adjusted | Quantity delta, variant and location | Inventory against an adjustment/variance account | Valuation method (e.g. FIFO or weighted average) is not defined; current stock quantity is not a reliable accounting valuation |
 | Expense created | Category, amount, description, location | Expense and treasury/payable accounts | Implemented only for explicitly configured categories |
@@ -46,7 +46,7 @@ The ledger engine supports balanced entries with 2–200 lines, source reference
 - Do not assume that every purchase is paid immediately or that every sale is cash-settled.
 - Do not post tax lines until tax fields and tax-inclusive/exclusive semantics exist in the source domain.
 - Do not value inventory adjustments from current purchase price until the product's costing method is explicitly chosen and historical cost layers are available.
-- Do not post a return as a cash refund: the current return workflow has no refund/payment reversal operation.
+- Do not post a return as a cash refund: the current return workflow has no refund/payment reversal operation. Discounted sales returns are blocked until a deterministic share of the original sale discount is persisted or otherwise agreed.
 - SYSCOHADA legal conformity and the account templates must be reviewed by a qualified Mali/OHADA accounting professional.
 
 ## Acceptance tests
