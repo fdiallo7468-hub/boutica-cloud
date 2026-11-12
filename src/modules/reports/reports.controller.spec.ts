@@ -78,7 +78,7 @@ describe('ReportsController - Endpoints PDF', () => {
       const pdfBuffer = Buffer.from('%PDF-1.4 test inventory pdf content');
       mockReportsService.exportInventoryPdf.mockResolvedValue(pdfBuffer);
 
-      await controller.exportInventoryPdf(tenant, mockResponse as Response);
+      await controller.exportInventoryPdf(tenant, undefined, mockResponse as Response);
 
       expect(mockResponse.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
       expect(mockResponse.setHeader).toHaveBeenCalledWith(
@@ -93,7 +93,7 @@ describe('ReportsController - Endpoints PDF', () => {
       mockReportsService.exportInventoryPdf.mockRejectedValue(error);
 
       await expect(
-        controller.exportInventoryPdf(tenant, mockResponse as Response),
+        controller.exportInventoryPdf(tenant, undefined, mockResponse as Response),
       ).rejects.toThrow(InternalServerErrorException);
 
       expect(mockResponse.setHeader).not.toHaveBeenCalledWith('Content-Type', 'application/pdf');

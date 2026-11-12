@@ -1,0 +1,148 @@
+ALTER TABLE public.accounting_journals
+  ADD CONSTRAINT accounting_journals_business_id_id_unique UNIQUE (business_id, id);
+
+-- Boutica Cloud 3.0 — Phase 4.2/4.4: journal entries and ledger.
+-- Additive migration. Production is not migrated by this change.
+CREATE TABLE public.accounting_entries (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE RESTRICT,
+  journal_id uuid NOT NULL,
+  period_id uuid NOT NULL,
+  entry_number varchar(60) NOT NULL,
+  entry_date date NOT NULL,
+  description varchar(240) NOT NULL,
+  status text NOT NULL DEFAULT 'DRAFT',
+  source_type text,
+  source_id text,
+  idempotency_key varchar(120),
+  request_hash text,
+  reversal_of_entry_id uuid,
+  posted_at timestamptz NOT NULL DEFAULT now(),
+  created_by text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT accounting_entries_business_id_id_unique UNIQUE (business_id, id),
+  CONSTRAINT accounting_entries_business_number_unique UNIQUE (business_id, entry_number),
+  CONSTRAINT accounting_entries_journal_fk FOREIGN KEY (business_id, journal_id)
+    REFERENCES public.accounting_journals (business_id, id) ON DELETE RESTRICT,
+  CONSTRAINT accounting_entries_period_fk FOREIGN KEY (business_id, period_id)
+    REFERENCES public.accounting_periods (business_id, id) ON DELETE RESTRICT,
+  CONSTRAINT accounting_entries_reversal_fk FOREIGN KEY (business_id, reversal_of_entry_id)
+    REFERENCES public.accounting_entries (business_id, id) ON DELETE RESTRICT,
+  CONSTRAINT accounting_entries_status_check CHECK (status IN ('DRAFT', 'POSTED')),
+  CONSTRAINT accounting_entries_source_pair_check CHECK ((source_type IS NULL) = (source_id IS NULL)),
+  CONSTRAINT accounting_entries_description_check CHECK (length(btrim(description)) BETWEEN 2 AND 240),
+  CONSTRAINT accounting_entries_no_self_reversal CHECK (reversal_of_entry_id IS NULL OR reversal_of_entry_id <> id)
+);
+CREATE UNIQUE INDEX accounting_entries_source_unique
+  ON public.accounting_entries (business_id, source_type, source_id)
+  WHERE source_type IS NOT NULL;
+CREATE UNIQUE INDEX accounting_entries_idempotency_unique
+  ON public.accounting_entries (business_id, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX accounting_entries_single_reversal_unique
+  ON public.accounting_entries (business_id, reversal_of_entry_id)
+  WHERE reversal_of_entry_id IS NOT NULL;
+CREATE INDEX accounting_entries_business_date_idx
+  ON public.accounting_entries (business_id, entry_date, id);
+CREATE INDEX accounting_entries_business_period_idx
+  ON public.accounting_entries (business_id, period_id, entry_date);
+
+CREATE TABLE public.accounting_entry_lines (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id uuid NOT NULL,
+  entry_id uuid NOT NULL,
+  line_number integer NOT NULL,
+  account_id uuid NOT NULL,
+  description varchar(240),
+  debit numeric(18,2) NOT NULL DEFAULT 0,
+  credit numeric(18,2) NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT accounting_entry_lines_entry_fk FOREIGN KEY (business_id, entry_id)
+    REFERENCES public.accounting_entries (business_id, id) ON DELETE RESTRICT,
+  CONSTRAINT accounting_entry_lines_account_fk FOREIGN KEY (business_id, account_id)
+    REFERENCES public.accounting_accounts (business_id, id) ON DELETE RESTRICT,
+  CONSTRAINT accounting_entry_lines_entry_line_unique UNIQUE (entry_id, line_number),
+  CONSTRAINT accounting_entry_lines_line_number_check CHECK (line_number > 0),
+  CONSTRAINT accounting_entry_lines_amounts_check CHECK (
+    debit >= 0 AND credit >= 0 AND
+    ((debit > 0 AND credit = 0) OR (credit > 0 AND debit = 0))
+  )
+);
+CREATE INDEX accounting_entry_lines_business_account_idx
+  ON public.accounting_entry_lines (business_id, account_id, entry_id);
+
+-- Posted accounting data is append-only. Corrections are new reversal entries.
+CREATE FUNCTION public.reject_posted_accounting_entry_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE target_status text;
+BEGIN
+  IF TG_TABLE_NAME = 'accounting_entries' THEN
+    IF TG_OP = 'INSERT' THEN
+      IF NEW.status <> 'DRAFT' THEN
+        RAISE EXCEPTION 'Accounting entries must be created as DRAFT before posting';
+      END IF;
+      RETURN NEW;
+    END IF;
+    IF OLD.status = 'POSTED' THEN
+      RAISE EXCEPTION 'Posted accounting entries are immutable; create a reversal entry';
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  -- For entry lines, protect both the old and new parent on UPDATE so a
+  -- line cannot be moved out of a posted entry into a draft entry.
+  IF TG_OP IN ('UPDATE', 'DELETE') THEN
+    SELECT status INTO STRICT target_status
+    FROM public.accounting_entries
+    WHERE business_id = OLD.business_id AND id = OLD.entry_id;
+    IF target_status = 'POSTED' THEN
+      RAISE EXCEPTION 'Lines of a posted accounting entry are immutable';
+    END IF;
+  END IF;
+  IF TG_OP IN ('INSERT', 'UPDATE') THEN
+    SELECT status INTO STRICT target_status
+    FROM public.accounting_entries
+    WHERE business_id = NEW.business_id AND id = NEW.entry_id;
+    IF target_status = 'POSTED' THEN
+      RAISE EXCEPTION 'Lines of a posted accounting entry are immutable';
+    END IF;
+    RETURN NEW;
+  END IF;
+  RETURN OLD;
+END;
+$$;
+CREATE TRIGGER accounting_entries_append_only
+  BEFORE UPDATE OR DELETE ON public.accounting_entries
+  FOR EACH ROW EXECUTE FUNCTION public.reject_posted_accounting_entry_mutation();
+CREATE TRIGGER accounting_entry_lines_append_only
+  BEFORE INSERT OR UPDATE OR DELETE ON public.accounting_entry_lines
+  FOR EACH ROW EXECUTE FUNCTION public.reject_posted_accounting_entry_mutation();
+
+-- Enforce balanced, non-empty entries at the database transaction boundary.
+CREATE FUNCTION public.assert_posted_accounting_entry_balanced() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE current_status text;
+DECLARE line_count integer;
+DECLARE debit_total numeric(24,2);
+DECLARE credit_total numeric(24,2);
+BEGIN
+  SELECT status INTO current_status
+  FROM public.accounting_entries
+  WHERE business_id = NEW.business_id AND id = NEW.id;
+  IF current_status IS DISTINCT FROM 'POSTED' THEN
+    RETURN NULL;
+  END IF;
+  SELECT count(*), COALESCE(sum(debit), 0), COALESCE(sum(credit), 0)
+    INTO line_count, debit_total, credit_total
+  FROM public.accounting_entry_lines
+  WHERE business_id = NEW.business_id AND entry_id = NEW.id;
+  IF line_count < 2 OR debit_total <= 0 OR debit_total <> credit_total THEN
+    RAISE EXCEPTION 'Posted accounting entry must have at least two lines and balanced positive debit/credit totals';
+  END IF;
+  RETURN NULL;
+END;
+$$;
+CREATE CONSTRAINT TRIGGER accounting_entries_must_balance
+  AFTER INSERT OR UPDATE OF status ON public.accounting_entries
+  DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION public.assert_posted_accounting_entry_balanced();

@@ -2,8 +2,10 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../../infrastructure/database/database';
+import { AuditEventsService } from '../../../infrastructure/database/audit-events.service';
 import {
   businesses,
+  inventoryBalances,
   idempotencyKeys,
   returnItems,
   returns,
@@ -17,6 +19,9 @@ import { hashRequestPayload } from '../../../common/idempotency/idempotency.util
 import { Tenant } from '../../auth/tenant.type';
 import { Return, SaleItemReturnableInfo } from '../domain/return';
 import { CreateReturnDto } from '../dto/create-return.dto';
+import { LoyaltyLedgerService } from '../../loyalty/loyalty-ledger.service';
+import { AccountingOperationalPostingService } from '../../accounting/accounting-operational-posting.service';
+import { InventoryValuationService } from '../../inventory/inventory-valuation.service';
 
 const ENDPOINT = 'returns.create';
 
@@ -27,7 +32,13 @@ export interface CreateReturnResult {
 
 @Injectable()
 export class CreateReturnUseCase {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly accountingPosting: AccountingOperationalPostingService,
+    private readonly loyaltyLedger: LoyaltyLedgerService = new LoyaltyLedgerService(),
+    private readonly auditEvents: AuditEventsService = new AuditEventsService(),
+    private readonly inventoryValuation: InventoryValuationService = new InventoryValuationService(),
+  ) {}
 
   async execute(tenant: Tenant, dto: CreateReturnDto, idempotencyKey: string | undefined): Promise<CreateReturnResult> {
     const requestHash = hashRequestPayload(dto);
@@ -119,6 +130,7 @@ export class CreateReturnUseCase {
         .returning();
 
       const itemRows = [];
+      const saleItemById = new Map(lockedSaleItems.map((item) => [item.id, item]));
       for (const item of returnEntity.items) {
         const [row] = await tx
           .insert(returnItems)
@@ -134,12 +146,25 @@ export class CreateReturnUseCase {
         itemRows.push(row);
 
         if (item.condition === 'RESTOCK') {
+          const originalSaleItem = saleItemById.get(item.saleItemId);
+          if (!originalSaleItem?.costAtSale) {
+            throw new ConflictException('The original sale has no historical CUMP cost; this item cannot be restocked automatically');
+          }
+          await this.inventoryValuation.restoreReturn(
+            tx, tenant.businessId, item.variantId, item.quantity.value, originalSaleItem.costAtSale,
+          );
           await tx
             .insert(stock)
             .values({ variantId: item.variantId, businessId: tenant.businessId, quantity: item.quantity.value })
             .onConflictDoUpdate({
               target: stock.variantId,
               set: { quantity: sql`${stock.quantity} + ${item.quantity.value}`, updatedAt: new Date() },
+            });
+          await tx.insert(inventoryBalances)
+            .values({ businessId: tenant.businessId, locationId: sale.locationId, variantId: item.variantId, quantity: item.quantity.value })
+            .onConflictDoUpdate({
+              target: [inventoryBalances.businessId, inventoryBalances.locationId, inventoryBalances.variantId],
+              set: { quantity: sql`${inventoryBalances.quantity} + ${item.quantity.value}`, updatedAt: new Date() },
             });
         }
 
@@ -149,6 +174,7 @@ export class CreateReturnUseCase {
         // distinction is carried by `type`, not by zeroing the quantity.
         await tx.insert(stockMovements).values({
           businessId: tenant.businessId,
+          locationId: sale.locationId,
           variantId: item.variantId,
           type: item.condition === 'RESTOCK' ? 'RETURN' : 'DAMAGE',
           quantity: item.quantity.value,
@@ -157,7 +183,25 @@ export class CreateReturnUseCase {
         });
       }
 
-      const responseBody = { ...returnRow, items: itemRows };
+      await this.loyaltyLedger.reverseForReturn(tx, {
+        businessId: tenant.businessId,
+        returnId,
+        saleId: sale.id,
+        actorUserId: tenant.userId,
+      });
+
+      const accounting = await this.accountingPosting.postReturn(tx, tenant, {
+        ...returnRow!,
+        locationId: sale.locationId,
+        customerId: sale.customerId,
+        saleDiscount: sale.discount,
+      }, returnEntity.items.map((item) => ({
+        quantity: item.quantity.value,
+        condition: item.condition,
+        costAtSale: saleItemById.get(item.saleItemId)?.costAtSale ?? null,
+      })));
+
+      const responseBody = { ...returnRow, items: itemRows, accounting };
 
       if (idempotencyKey) {
         await tx.insert(idempotencyKeys).values({
@@ -169,6 +213,16 @@ export class CreateReturnUseCase {
           responseBody,
         });
       }
+
+      await this.auditEvents.appendInTransaction(tx, {
+        businessId: tenant.businessId,
+        actorUserId: tenant.userId,
+        locationId: sale.locationId,
+        action: 'return.completed',
+        resourceType: 'return',
+        resourceId: returnId,
+        metadata: { saleId: sale.id, total: total.toDecimalString(), itemCount: itemRows.length, currency },
+      });
 
       return { body: responseBody, replayed: false };
     });

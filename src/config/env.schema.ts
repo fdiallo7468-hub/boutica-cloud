@@ -7,12 +7,14 @@ export const KNOWN_DEV_SECRETS = [
   'dev_secret_key_1234567890_at_least_32_chars',
   '12345678901234567890123456789012',
   'abcdefghijklmnopqrstuvwxyz123456',
+  'generate_at_least_32_characters_random_secret_here',
 ];
 
 const KNOWN_DEV_DB_URLS = [
   'postgresql://user:password@localhost:5432/boutica',
   'postgresql://localhost:5432/boutica',
   'postgres://localhost:5432/boutica',
+  'postgresql://boutica_app:change_me@localhost:5432/boutica',
 ];
 
 /**
@@ -152,6 +154,9 @@ const rawEnvSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
 
   DATABASE_URL: z.string().optional(),
+  // Direct PostgreSQL connection used only by Drizzle migration tooling; never by API request pools.
+  DATABASE_URL_UNPOOLED: z.string().optional(), // legacy alias; prefer DATABASE_MIGRATION_URL
+  DATABASE_MIGRATION_URL: z.string().optional(),
   BETTER_AUTH_SECRET: z.string().optional(),
   BETTER_AUTH_URL: z.string().optional(),
   CORS_ORIGIN: z.string().optional(),
@@ -175,7 +180,7 @@ const rawEnvSchema = z.object({
   NOVU_WORKFLOW_INVENTORY_OUT_OF_STOCK: z.string().optional(),
   // Resend & Transactional Email
   RESEND_API_KEY: z.string().optional(),
-  EMAIL_FROM: z.string().default('Boutica Cloud <notifications@boutica.cloud>'),
+  EMAIL_FROM: z.string().default('Boutica Cloud <notifications@example.com>'),
   RESET_PASSWORD_URL: z.string().url().optional(),
 
   // Puppeteer & PDF Generation
@@ -193,17 +198,13 @@ export const envSchema = rawEnvSchema.transform((raw, ctx) => {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['DATABASE_URL'],
-        message: 'DATABASE_URL is required in production (e.g. a Neon or PostgreSQL connection string)',
+        message: 'DATABASE_URL is required in production (a PostgreSQL connection string)',
       });
-    } else if (
-      KNOWN_DEV_DB_URLS.includes(databaseUrl.trim()) ||
-      databaseUrl.includes('localhost') ||
-      databaseUrl.includes('127.0.0.1')
-    ) {
+    } else if (KNOWN_DEV_DB_URLS.includes(databaseUrl.trim())) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['DATABASE_URL'],
-        message: 'DATABASE_URL cannot use localhost or demo fallback values in production',
+        message: 'DATABASE_URL cannot use a known development/demo fallback value in production',
       });
     } else if (!databaseUrl.startsWith('postgresql://') && !databaseUrl.startsWith('postgres://')) {
       ctx.addIssue({
@@ -259,7 +260,7 @@ export const envSchema = rawEnvSchema.transform((raw, ctx) => {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['BETTER_AUTH_URL'],
-        message: 'BETTER_AUTH_URL is required in production (e.g. https://boutica-cloud.onrender.com)',
+        message: 'BETTER_AUTH_URL is required in production (the public base URL of this installation)',
       });
     } else {
       try {

@@ -26,7 +26,7 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
 
   const expressApp = app.getHttpAdapter().getInstance();
-  // 1. Confiance au proxy inverse Render (HTTPS, en-têtes x-forwarded-proto)
+  // 1. Respect the configured reverse-proxy hop count for forwarded headers.
   expressApp.set('trust proxy', 1);
 
   // 2. Gestionnaire Better Auth natif direct : préserve l\x27intégralité du chemin et des paramètres de requête (query params)
@@ -140,7 +140,7 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swaggerConfig));
 
   const configuredPort = config.get('PORT', { infer: true });
-  const port = configuredPort === 8080 ? 3000 : (configuredPort || 3000);
+  const port = configuredPort || 3000;
   await app.listen(port);
   logger.log(`Boutica backend listening on port ${port}`);
 }

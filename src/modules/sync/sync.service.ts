@@ -2,8 +2,10 @@ import { BadRequestException, ConflictException, HttpException, Injectable, Logg
 import { and, eq, gt, or, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
 import {
+  businessLocations,
   customers,
   expenses,
+  inventoryBalances,
   offlineOperationsLog,
   payments,
   products,
@@ -21,6 +23,9 @@ import { FinanceService } from '../finance/finance.service';
 import { PaymentMethodEnum } from '../finance/dto/finance.dto';
 import { NotificationOutboxService } from '../notifications/notification-outbox.service';
 import { NOVU_EVENT_TYPES } from '../notifications/novu.types';
+import { LoyaltyLedgerService } from '../loyalty/loyalty-ledger.service';
+import { AccountingOperationalPostingService } from '../accounting/accounting-operational-posting.service';
+import { InventoryValuationService } from '../inventory/inventory-valuation.service';
 import { OfflineOperationItemDto, RegisterDeviceDto, SyncPushDto } from './dto/sync.dto';
 
 @Injectable()
@@ -31,6 +36,9 @@ export class SyncService {
     private readonly db: DatabaseService,
     private readonly financeService: FinanceService,
     private readonly outboxService: NotificationOutboxService,
+    private readonly accountingPosting: AccountingOperationalPostingService,
+    private readonly loyaltyLedger: LoyaltyLedgerService = new LoyaltyLedgerService(),
+    private readonly inventoryValuation: InventoryValuationService = new InventoryValuationService(),
   ) {}
 
   /**
@@ -307,6 +315,15 @@ export class SyncService {
 
             case 'CREATE_SALE': {
               const p = op.payload as any;
+              const [defaultLocation] = await operationTx
+                .select({ id: businessLocations.id })
+                .from(businessLocations)
+                .where(and(
+                  eq(businessLocations.businessId, tenant.businessId),
+                  eq(businessLocations.isDefault, true),
+                  eq(businessLocations.isActive, true),
+                ));
+              if (!defaultLocation) throw new BadRequestException('No active default business location is configured');
               const saleId = p.id || undefined;
 
               if (!Array.isArray(p.items) || p.items.length === 0) {
@@ -324,10 +341,6 @@ export class SyncService {
                 const unitPrice = Number(item.unitPrice);
                 if (!Number.isFinite(unitPrice) || unitPrice < 0) {
                   throw new BadRequestException('Sale item unit prices must be finite non-negative numbers');
-                }
-                if (item.costAtSale !== undefined && item.costAtSale !== null &&
-                    (!Number.isFinite(Number(item.costAtSale)) || Number(item.costAtSale) < 0)) {
-                  throw new BadRequestException('Sale item costAtSale must be a finite non-negative number');
                 }
                 return sum + Math.round(unitPrice * 100) * item.quantity;
               }, 0);
@@ -355,6 +368,7 @@ export class SyncService {
                   throw new BadRequestException('Customer does not belong to this business or is inactive');
                 }
               }
+              const variantSnapshots = new Map<string, { sellingPrice: string }>();
               for (const item of p.items) {
                 if (!item || typeof item.variantId !== 'string' || !Number.isSafeInteger(item.quantity) || item.quantity <= 0) {
                   throw new BadRequestException('Each sale item requires a valid variant and a positive integer quantity');
@@ -363,7 +377,7 @@ export class SyncService {
                   throw new BadRequestException('Sale item unit prices must be finite non-negative numbers');
                 }
                 const [ownedVariant] = await operationTx
-                  .select({ id: variants.id })
+                  .select({ id: variants.id, sellingPrice: variants.sellingPrice })
                   .from(variants)
                   .innerJoin(products, eq(variants.productId, products.id))
                   .where(and(
@@ -375,6 +389,10 @@ export class SyncService {
                 if (!ownedVariant) {
                   throw new BadRequestException('A sale item references a variant outside this business');
                 }
+                if (Math.round(Number(item.unitPrice) * 100) !== Math.round(Number(ownedVariant.sellingPrice) * 100)) {
+                  throw new ConflictException('Offline sale price no longer matches the server catalog; reconcile the sale before syncing');
+                }
+                variantSnapshots.set(item.variantId, { sellingPrice: ownedVariant.sellingPrice });
               }
 
               const [sale] = await operationTx
@@ -382,6 +400,7 @@ export class SyncService {
                 .values({
                   id: saleId,
                   businessId: tenant.businessId,
+                  locationId: defaultLocation.id,
                   customerId: p.customerId || null,
                   status: 'COMPLETED',
                   subtotal: p.subtotal.toString(),
@@ -397,16 +416,24 @@ export class SyncService {
               }
               entityId = sale.id;
 
-              // Insertion des lignes de vente et décrémentation atomique de stock
+              // Persist catalog-owned prices and cost snapshots, never client-supplied values.
+              const saleItemRows = [];
               if (p.items && Array.isArray(p.items)) {
                 for (const item of p.items) {
-                  await operationTx.insert(saleItems).values({
+                  const snapshot = variantSnapshots.get(item.variantId);
+                  if (!snapshot) throw new ConflictException('A sale item catalog snapshot is missing');
+                  const costAtSale = await this.inventoryValuation.consume(
+                    operationTx, tenant.businessId, item.variantId, item.quantity,
+                  );
+                  const [saleItem] = await operationTx.insert(saleItems).values({
                     saleId: entityId!,
                     variantId: item.variantId,
                     quantity: item.quantity,
-                    unitPrice: item.unitPrice.toString(),
-                    costAtSale: item.costAtSale ? item.costAtSale.toString() : null,
-                  });
+                    unitPrice: snapshot.sellingPrice,
+                    costAtSale,
+                  }).returning();
+                  if (!saleItem) throw new ConflictException('A synchronized sale item could not be persisted');
+                  saleItemRows.push(saleItem);
 
                   // Décrémentation de stock (delta)
                   await operationTx
@@ -425,9 +452,23 @@ export class SyncService {
                       },
                     });
 
+                  // Décrémentation du solde existant de l’établissement.
+                  // Les soldes initiaux sont créés par la migration depuis le stock legacy.
+                  await operationTx.update(inventoryBalances)
+                    .set({
+                      quantity: sql`${inventoryBalances.quantity} - ${item.quantity}`,
+                      updatedAt: new Date(),
+                    })
+                    .where(and(
+                      eq(inventoryBalances.businessId, tenant.businessId),
+                      eq(inventoryBalances.locationId, defaultLocation.id),
+                      eq(inventoryBalances.variantId, item.variantId),
+                    ));
+
                   // Mouvement de stock d'audit
                   await operationTx.insert(stockMovements).values({
                     businessId: tenant.businessId,
+                    locationId: defaultLocation.id,
                     variantId: item.variantId,
                     type: 'SALE',
                     quantity: -item.quantity,
@@ -435,6 +476,16 @@ export class SyncService {
                   });
                 }
               }
+
+              const accounting = await this.accountingPosting.postSale(operationTx, tenant, sale!, saleItemRows);
+
+              await this.loyaltyLedger.awardForSale(operationTx, {
+                businessId: tenant.businessId,
+                customerId: p.customerId || null,
+                saleId: entityId!,
+                actorUserId: tenant.userId,
+                total: (totalCents / 100).toFixed(2),
+              });
 
               // Émission d'événement outbox Novu
               await this.outboxService.enqueue(operationTx, {
@@ -477,6 +528,15 @@ export class SyncService {
 
             case 'RECORD_EXPENSE': {
               const p = op.payload as any;
+              const [defaultLocation] = await operationTx
+                .select({ id: businessLocations.id })
+                .from(businessLocations)
+                .where(and(
+                  eq(businessLocations.businessId, tenant.businessId),
+                  eq(businessLocations.isDefault, true),
+                  eq(businessLocations.isActive, true),
+                ));
+              if (!defaultLocation) throw new BadRequestException('No active default business location is configured');
               const expenseAmount = Number(p.amount);
               if (typeof p.category !== 'string' || !p.category.trim() ||
                   !Number.isFinite(expenseAmount) || expenseAmount <= 0) {
@@ -487,13 +547,16 @@ export class SyncService {
                 .values({
                   id: p.id || undefined,
                   businessId: tenant.businessId,
+                  locationId: defaultLocation.id,
                   category: p.category,
                   description: p.description || null,
                   amount: expenseAmount.toString(),
                   createdAt: op.clientTimestamp ? new Date(op.clientTimestamp) : new Date(),
                 })
                 .returning();
-              entityId = exp?.id || p.id;
+              if (!exp) throw new ConflictException('A synchronized expense could not be persisted');
+              entityId = exp.id;
+              await this.accountingPosting.postExpense(operationTx, tenant, exp);
               break;
             }
 

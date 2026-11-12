@@ -36,6 +36,10 @@ describe("Multi-Business Management (Isolation, Roles & Switching)", () => {
         update: jest.fn(),
         delete: jest.fn(),
         transaction: jest.fn(async (cb) => cb(mockDb.db)),
+        execute: jest.fn().mockResolvedValue({ rows: [] }),
+      },
+      baseDb: {
+        transaction: jest.fn(async (cb) => cb(mockDb.db)),
       },
     };
 

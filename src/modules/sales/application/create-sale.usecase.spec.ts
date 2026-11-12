@@ -1,6 +1,8 @@
 import { DatabaseService } from '../../../infrastructure/database/database';
 import {
   businesses,
+  businessLocations,
+  inventoryBalances,
   notificationOutbox,
   saleItems,
   sales,
@@ -16,6 +18,9 @@ describe('CreateSaleUseCase notification events', () => {
     const variantId = 'bb6b6d02-a34a-42e5-9bc5-b12feabf6f08';
     const tenant = { userId: 'owner-user-id', businessId, role: 'OWNER' as const };
     const businessWhere = jest.fn().mockResolvedValue([{ currency: 'XOF' }]);
+    const locationWhere = jest.fn().mockReturnValue({
+      limit: jest.fn().mockResolvedValue([{ id: 'location-main' }]),
+    });
     const variantWhere = jest.fn().mockResolvedValue([{
       id: variantId,
       businessId,
@@ -33,6 +38,7 @@ describe('CreateSaleUseCase notification events', () => {
     });
     const selectResults = [
       buildSelectResult(businessWhere),
+      buildSelectResult(locationWhere),
       buildSelectResult(variantWhere),
       buildSelectResult(stockWhere),
     ];
@@ -58,6 +64,9 @@ describe('CreateSaleUseCase notification events', () => {
               returning: jest.fn().mockResolvedValue([{ id: 'sale-item-id' }]),
             }),
           };
+        }
+        if (table === inventoryBalances) {
+          return { values: jest.fn().mockReturnValue({ onConflictDoUpdate: jest.fn().mockResolvedValue(undefined) }) };
         }
         if (table === stockMovements) {
           return { values: jest.fn().mockResolvedValue(undefined) };
@@ -86,13 +95,26 @@ describe('CreateSaleUseCase notification events', () => {
         insertedEvents.push(event);
       }),
     } as any;
-    const useCase = new CreateSaleUseCase(database, mockOutboxService);
+    const mockAuditEventsService = {
+      append: jest.fn(),
+      appendInTransaction: jest.fn().mockResolvedValue('audit-event-1'),
+    };
+    const mockAccountingPosting = {
+      postSale: jest.fn().mockResolvedValue({ status: 'NOT_CONFIGURED', entryId: null }),
+    };
+    const mockInventoryValuation = { consume: jest.fn().mockResolvedValue('800.00') };
+    const useCase = new CreateSaleUseCase(database, mockOutboxService, mockAccountingPosting as any, undefined, mockAuditEventsService, mockInventoryValuation as any);
 
     const result = await useCase.execute(tenant, {
       items: [{ variantId, quantity: 1 }],
     }, undefined);
 
     expect(result.replayed).toBe(false);
+    expect(mockInventoryValuation.consume).toHaveBeenCalledWith(tx, businessId, variantId, 1);
+    expect(mockAuditEventsService.appendInTransaction).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ action: 'sale.created', resourceType: 'sale' }),
+    );
     expect(insertedEvents).toHaveLength(2);
     expect(insertedEvents.map((event) => event.eventType)).toEqual([
       'sale.completed',
@@ -103,6 +125,6 @@ describe('CreateSaleUseCase notification events', () => {
       previousQuantity: 6,
       quantity: 5,
     }));
-    expect(selectedTables).toEqual([businesses, variants, stock]);
+    expect(selectedTables).toEqual([businesses, businessLocations, variants, stock]);
   });
 });

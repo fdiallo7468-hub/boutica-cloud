@@ -23,7 +23,7 @@ describe('Catalog — variants (e2e)', () => {
     await request(app.getHttpServer())
       .post(`/api/v1/inventory/${variantId}/adjust`)
       .set('Authorization', `Bearer ${accessToken}`)
-      .send({ quantity: 7 })
+      .send({ quantity: 7, unitCost: '20.00' })
       .expect(201);
 
     const res = await request(app.getHttpServer())

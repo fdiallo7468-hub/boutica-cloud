@@ -2,17 +2,180 @@
   "version": "7",
   "dialect": "postgresql",
   "entries": [
-    {"idx":0,"version":"7","when":1791098735766,"tag":"0000_flat_jack_power","breakpoints":true},
-    {"idx":1,"version":"7","when":1792664919277,"tag":"0001_auth_evolution_business_user_fields","breakpoints":true},
-    {"idx":2,"version":"7","when":1793458682639,"tag":"0002_cloudy_scarlet_spider","breakpoints":true},
-    {"idx":3,"version":"7","when":1793489554329,"tag":"0003_secret_tinkerer","breakpoints":true},
-    {"idx":4,"version":"7","when":1793489943501,"tag":"0004_clear_landau","breakpoints":true},
-    {"idx":5,"version":"7","when":1793500000000,"tag":"0005_sectors_activities_multibusiness","breakpoints":true},
-    {"idx":6,"version":"7","when":1793505000000,"tag":"0006_finance_sync_outbox","breakpoints":true},
-    {"idx":7,"version":"7","when":1794182400000,"tag":"0007_notification_finance_event_types","breakpoints":true},
-    {"idx":8,"version":"7","when":1794182401000,"tag":"0008_customer_supplier_archiving","breakpoints":true},
-    {"idx":9,"version":"7","when":1794182402000,"tag":"0009_outbox_deduplication_unique","breakpoints":true},
-    {"idx":10,"version":"7","when":1794182403000,"tag":"0010_atomic_user_business_provisioning","breakpoints":true},
-    {"idx":11,"version":"7","when":1794332280000,"tag":"0011_repair_business_provisioning_rls","breakpoints":true}
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1791098735766,
+      "tag": "0000_flat_jack_power",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792664919277,
+      "tag": "0001_auth_evolution_business_user_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793458682639,
+      "tag": "0002_cloudy_scarlet_spider",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793489554329,
+      "tag": "0003_secret_tinkerer",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793489943501,
+      "tag": "0004_clear_landau",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793500000000,
+      "tag": "0005_sectors_activities_multibusiness",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793505000000,
+      "tag": "0006_finance_sync_outbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794182400000,
+      "tag": "0007_notification_finance_event_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794182401000,
+      "tag": "0008_customer_supplier_archiving",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794182402000,
+      "tag": "0009_outbox_deduplication_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794182403000,
+      "tag": "0010_atomic_user_business_provisioning",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794332280000,
+      "tag": "0011_repair_business_provisioning_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794332281000,
+      "tag": "0012_business_locations",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794340000000,
+      "tag": "0013_append_only_audit_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794350000000,
+      "tag": "0014_operational_locations_inventory",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1794384840000,
+      "tag": "0015_loyalty_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1794390720000,
+      "tag": "0016_syscohada_accounting_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1794391000000,
+      "tag": "0017_accounting_entries_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794392000000,
+      "tag": "0018_accounting_operational_mappings",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794393000000,
+      "tag": "0019_accounting_auxiliary_ledgers",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794418221581,
+      "tag": "0020_tenant_row_level_security",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794418222000,
+      "tag": "0021_accounting_multi_line_posting_templates",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794418223000,
+      "tag": "0022_accounting_purchase_payment_return_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794418224000,
+      "tag": "0023_inventory_cump_valuation",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794418225000,
+      "tag": "0024_stock_adjustment_accounting_event",
+      "breakpoints": true
+    }
   ]
 }

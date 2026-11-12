@@ -1,3 +1,5 @@
+import { PERMISSIONS } from '../auth/permissions/permission-catalog';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import { Body, Controller, Get, Headers, HttpCode, HttpStatus, NotFoundException, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { and, count, desc, eq, gte, lte } from 'drizzle-orm';
@@ -8,6 +10,7 @@ import { Tenant } from '../auth/tenant.type';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { ListSalesQueryDto } from './dto/list-sales-query.dto';
 import { CreateSaleUseCase } from './application/create-sale.usecase';
+import { CancelSaleUseCase } from './application/cancel-sale.usecase';
 
 @ApiTags('sales')
 @Controller('api/v1/sales')
@@ -15,13 +18,22 @@ export class SalesController {
   constructor(
     private readonly createSale: CreateSaleUseCase,
     private readonly db: DatabaseService,
+    private readonly cancelSale: CancelSaleUseCase,
   ) {}
 
+  @RequirePermissions(PERMISSIONS.SALES_CREATE)
   @Post()
   @HttpCode(HttpStatus.CREATED)
   async create(@CurrentTenant() tenant: Tenant, @Body() body: CreateSaleDto, @Headers('idempotency-key') idempotencyKey?: string) {
     const { body: sale } = await this.createSale.execute(tenant, body, idempotencyKey);
     return sale;
+  }
+
+  @RequirePermissions(PERMISSIONS.SALES_CANCEL)
+  @Post(':id/cancel')
+  @HttpCode(HttpStatus.OK)
+  async cancel(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) id: string) {
+    return this.cancelSale.execute(tenant, id);
   }
 
   // NEW (v2.1, client-integration audit P0 §5): sales could be created but
@@ -31,6 +43,7 @@ export class SalesController {
   // pattern already used for Catalog/Customers/Expenses (AUDIT_REPORT.md
   // P2-1) — this talks to DatabaseService directly rather than adding a
   // use-case for it; CreateSaleUseCase's transactional logic is untouched.
+  @RequirePermissions(PERMISSIONS.SALES_READ)
   @Get()
   async list(@CurrentTenant() tenant: Tenant, @Query() query: ListSalesQueryDto) {
     const filters = [eq(sales.businessId, tenant.businessId)];
@@ -52,6 +65,7 @@ export class SalesController {
     return { data, page: query.page, pageSize: query.pageSize, total };
   }
 
+  @RequirePermissions(PERMISSIONS.SALES_READ)
   @Get(':id')
   async get(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) id: string) {
     const [sale] = await this.db.db

@@ -2,7 +2,8 @@ import { BadRequestException, ConflictException, Injectable } from '@nestjs/comm
 import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../../infrastructure/database/database';
-import { businesses, customers, idempotencyKeys, saleItems, sales, stock, stockMovements, variants } from '../../../infrastructure/database/schema';
+import { AuditEventsService } from '../../../infrastructure/database/audit-events.service';
+import { businesses, businessLocations, customers, idempotencyKeys, inventoryBalances, saleItems, sales, stock, stockMovements, variants } from '../../../infrastructure/database/schema';
 import { Money, Quantity } from '../../../common/domain';
 import { hashRequestPayload } from '../../../common/idempotency/idempotency.util';
 import { Tenant } from '../../auth/tenant.type';
@@ -12,6 +13,9 @@ import { CreateSaleDto } from '../dto/create-sale.dto';
 import { NotificationOutboxService } from '../../notifications/notification-outbox.service';
 import { NOVU_EVENT_TYPES } from '../../notifications/novu.types';
 import { getStockNotificationTransitions } from '../../notifications/notification-events';
+import { LoyaltyLedgerService } from '../../loyalty/loyalty-ledger.service';
+import { AccountingOperationalPostingService } from '../../accounting/accounting-operational-posting.service';
+import { InventoryValuationService } from '../../inventory/inventory-valuation.service';
 
 const ENDPOINT = 'sales.create';
 
@@ -25,6 +29,10 @@ export class CreateSaleUseCase {
   constructor(
     private readonly db: DatabaseService,
     private readonly outboxService: NotificationOutboxService,
+    private readonly accountingPosting: AccountingOperationalPostingService,
+    private readonly loyaltyLedger: LoyaltyLedgerService = new LoyaltyLedgerService(),
+    private readonly auditEvents: AuditEventsService = new AuditEventsService(),
+    private readonly inventoryValuation: InventoryValuationService = new InventoryValuationService(),
   ) {}
 
   async execute(tenant: Tenant, dto: CreateSaleDto, idempotencyKey: string | undefined): Promise<CreateSaleResult> {
@@ -52,6 +60,14 @@ export class CreateSaleUseCase {
 
       const [business] = await tx.select().from(businesses).where(eq(businesses.id, tenant.businessId));
       const currency = business?.currency ?? 'XOF';
+      const [location] = await tx.select({ id: businessLocations.id }).from(businessLocations).where(and(
+        eq(businessLocations.businessId, tenant.businessId),
+        dto.locationId ? eq(businessLocations.id, dto.locationId) : eq(businessLocations.isDefault, true),
+        eq(businessLocations.isActive, true),
+      )).limit(1);
+      if (!location) throw new BadRequestException(dto.locationId
+        ? 'Selected location does not exist, is inactive, or does not belong to this business'
+        : 'No active default business location is configured');
 
       if (dto.customerId) {
         const [customer] = await tx
@@ -141,6 +157,7 @@ export class CreateSaleUseCase {
         .values({
           id: saleId,
           businessId: tenant.businessId,
+          locationId: location.id,
           customerId: dto.customerId,
           subtotal: subtotal.toDecimalString(),
           discount: discount.toDecimalString(),
@@ -157,7 +174,7 @@ export class CreateSaleUseCase {
         // cost, so an old sale's reported margin would silently drift if
         // that cost changed later. See reports.controller.ts, which now
         // reads this column instead.
-        const costAtSale = variantById.get(item.variantId)!.purchasePrice;
+        const costAtSale = await this.inventoryValuation.consume(tx, tenant.businessId, item.variantId, item.quantity.value);
 
         const [row] = await tx
           .insert(saleItems)
@@ -169,6 +186,7 @@ export class CreateSaleUseCase {
             costAtSale,
           })
           .returning();
+        if (!row) throw new ConflictException('A sale item could not be persisted');
         itemRows.push(row);
 
         // ROUND 2 FIX: this used to compute an absolute new value from the
@@ -186,8 +204,17 @@ export class CreateSaleUseCase {
           .set({ quantity: sql`${stock.quantity} - ${item.quantity.value}`, updatedAt: new Date() })
           .where(and(eq(stock.variantId, item.variantId), eq(stock.businessId, tenant.businessId)));
 
+        await tx.update(inventoryBalances)
+          .set({ quantity: sql`${inventoryBalances.quantity} - ${item.quantity.value}`, updatedAt: new Date() })
+          .where(and(
+            eq(inventoryBalances.businessId, tenant.businessId),
+            eq(inventoryBalances.locationId, location.id),
+            eq(inventoryBalances.variantId, item.variantId),
+          ));
+
         await tx.insert(stockMovements).values({
           businessId: tenant.businessId,
+          locationId: location.id,
           variantId: item.variantId,
           type: 'SALE',
           quantity: -item.quantity.value,
@@ -195,7 +222,17 @@ export class CreateSaleUseCase {
         });
       }
 
-      const responseBody = { ...saleRow, items: itemRows };
+      const accounting = await this.accountingPosting.postSale(tx, tenant, saleRow!, itemRows);
+
+      await this.loyaltyLedger.awardForSale(tx, {
+        businessId: tenant.businessId,
+        customerId: dto.customerId,
+        saleId,
+        actorUserId: tenant.userId,
+        total: total.toDecimalString(),
+      });
+
+      const responseBody = { ...saleRow, items: itemRows, accounting };
 
       // Enqueue transactional outbox event for Novu
       await this.outboxService.enqueue(tx, {
@@ -249,6 +286,16 @@ export class CreateSaleUseCase {
           responseBody,
         });
       }
+
+      await this.auditEvents.appendInTransaction(tx, {
+        businessId: tenant.businessId,
+        actorUserId: tenant.userId,
+        locationId: location.id,
+        action: 'sale.created',
+        resourceType: 'sale',
+        resourceId: saleId,
+        metadata: { total: total.toDecimalString(), itemCount: itemRows.length, currency },
+      });
 
       return { body: responseBody, replayed: false };
     });

@@ -1,16 +1,21 @@
 import {
+  bigint,
   boolean,
   check,
+  date,
   index,
+  foreignKey,
   integer,
   jsonb,
   numeric,
+  primaryKey,
   pgEnum,
   pgTable,
   text,
   timestamp,
   uniqueIndex,
   uuid,
+  varchar,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -31,6 +36,36 @@ export const businesses = pgTable('businesses', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+/**
+ * v3 — Physical or operational locations belonging to a business tenant.
+ * A business always has one active default location; operational records
+ * will progressively receive a location_id in additive follow-up migrations.
+ */
+export const businessLocations = pgTable(
+  'business_locations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    code: text('code').notNull(),
+    name: text('name').notNull(),
+    address: text('address'),
+    phone: text('phone'),
+    isDefault: boolean('is_default').notNull().default(false),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessCodeUnique: uniqueIndex('business_locations_business_code_unique').on(t.businessId, t.code),
+    businessIdIdUnique: uniqueIndex('business_locations_business_id_id_unique').on(t.businessId, t.id),
+    oneDefaultPerBusiness: uniqueIndex('business_locations_one_default_per_business_unique')
+      .on(t.businessId)
+      .where(sql`${t.isDefault} = true`),
+    businessIdx: index('business_locations_business_idx').on(t.businessId),
+    activeIdx: index('business_locations_active_idx').on(t.businessId, t.isActive),
+  }),
+);
 
 /**
  * Activités commerciales d'une entreprise (secteur Quincaillerie et Électronique).
@@ -247,6 +282,7 @@ export const variants = pgTable(
     skuPerBusinessIdx: uniqueIndex('variants_business_sku_unique').on(t.businessId, t.sku),
     productIdx: index('variants_product_idx').on(t.productId),
     businessIdx: index('variants_business_idx').on(t.businessId),
+    businessIdIdUnique: uniqueIndex('variants_business_id_id_unique').on(t.businessId, t.id),
     sellingGtePurchase: check('variant_selling_gte_purchase', sql`${t.sellingPrice} >= ${t.purchasePrice}`),
     pricesNonNegative: check('variant_prices_non_negative', sql`${t.purchasePrice} >= 0 AND ${t.sellingPrice} >= 0`),
   }),
@@ -297,11 +333,31 @@ export const stock = pgTable(
   }),
 );
 
+/** Per-location stock balance. The legacy stock table remains the compatibility aggregate during v3 rollout. */
+export const inventoryBalances = pgTable(
+  'inventory_balances',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    locationId: uuid('location_id').notNull(),
+    variantId: uuid('variant_id').notNull(),
+    quantity: integer('quantity').notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    scopeUnique: uniqueIndex('inventory_balances_scope_unique').on(t.businessId, t.locationId, t.variantId),
+    businessVariantIdx: index('inventory_balances_business_variant_idx').on(t.businessId, t.variantId),
+    businessLocationIdx: index('inventory_balances_business_location_idx').on(t.businessId, t.locationId),
+    quantityNonNegative: check('inventory_balances_quantity_non_negative', sql`${t.quantity} >= 0`),
+  }),
+);
+
 export const stockMovements = pgTable(
   'stock_movements',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     businessId: uuid('business_id').notNull().references(() => businesses.id),
+    locationId: uuid('location_id').notNull(),
     variantId: uuid('variant_id').notNull().references(() => variants.id),
     type: movementType('type').notNull(),
     quantity: integer('quantity').notNull(),
@@ -315,6 +371,26 @@ export const stockMovements = pgTable(
   }),
 );
 
+export const inventoryValuations = pgTable(
+  'inventory_valuations',
+  {
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    variantId: uuid('variant_id').notNull().references(() => variants.id, { onDelete: 'cascade' }),
+    quantity: integer('quantity').notNull().default(0),
+    averageUnitCost: numeric('average_unit_cost', { precision: 14, scale: 2 }).notNull().default('0'),
+    totalValue: numeric('total_value', { precision: 18, scale: 2 }).notNull().default('0'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    primary: primaryKey({ columns: [t.businessId, t.variantId], name: 'inventory_valuations_pkey' }),
+    businessIdx: index('inventory_valuations_business_idx').on(t.businessId),
+    quantityNonNegative: check('inventory_valuations_quantity_non_negative', sql`${t.quantity} >= 0`),
+    averageNonNegative: check('inventory_valuations_average_non_negative', sql`${t.averageUnitCost} >= 0`),
+    totalNonNegative: check('inventory_valuations_total_non_negative', sql`${t.totalValue} >= 0`),
+  }),
+);
+
 export const suppliers = pgTable('suppliers', {
   id: uuid('id').defaultRandom().primaryKey(),
   businessId: uuid('business_id').notNull().references(() => businesses.id),
@@ -323,11 +399,12 @@ export const suppliers = pgTable('suppliers', {
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
+}, (t) => ({ businessIdIdUnique: uniqueIndex('suppliers_business_id_id_unique').on(t.businessId, t.id) }));
 
 export const purchases = pgTable('purchases', {
   id: uuid('id').defaultRandom().primaryKey(),
   businessId: uuid('business_id').notNull().references(() => businesses.id),
+  locationId: uuid('location_id').notNull(),
   supplierId: uuid('supplier_id').references(() => suppliers.id),
   status: purchaseStatus('status').notNull().default('DRAFT'),
   total: numeric('total', { precision: 14, scale: 2 }).notNull().default('0'),
@@ -352,13 +429,14 @@ export const customers = pgTable('customers', {
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
+}, (t) => ({ businessIdIdUnique: uniqueIndex('customers_business_id_id_unique').on(t.businessId, t.id) }));
 
 export const sales = pgTable(
   'sales',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     businessId: uuid('business_id').notNull().references(() => businesses.id),
+    locationId: uuid('location_id').notNull(),
     customerId: uuid('customer_id').references(() => customers.id),
     status: saleStatus('status').notNull().default('DRAFT'),
     subtotal: numeric('subtotal', { precision: 14, scale: 2 }).notNull().default('0'),
@@ -389,9 +467,49 @@ export const saleItems = pgTable('sale_items', {
   quantityPositive: check('sale_items_quantity_positive', sql`${t.quantity} > 0`),
 }));
 
+export const loyaltyConfigurations = pgTable('loyalty_configurations', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+  enabled: boolean('enabled').notNull().default(false),
+  earnPointsPer1000: integer('earn_points_per_1000').notNull().default(1),
+  pointValue: numeric('point_value', { precision: 14, scale: 4 }).notNull().default('1'),
+  minimumRedemptionPoints: integer('minimum_redemption_points').notNull().default(100),
+  expiryDays: integer('expiry_days'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  businessUnique: uniqueIndex('loyalty_configurations_business_unique').on(t.businessId),
+  validEarnRate: check('loyalty_configurations_earn_rate_non_negative', sql`${t.earnPointsPer1000} >= 0`),
+  validPointValue: check('loyalty_configurations_point_value_positive', sql`${t.pointValue} > 0`),
+  validMinimum: check('loyalty_configurations_minimum_non_negative', sql`${t.minimumRedemptionPoints} >= 0`),
+  validExpiry: check('loyalty_configurations_expiry_positive', sql`${t.expiryDays} IS NULL OR ${t.expiryDays} > 0`),
+}));
+
+/** Append-only points ledger. Corrections are compensating entries, never updates. */
+export const loyaltyLedger = pgTable('loyalty_ledger', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'restrict' }),
+  customerId: uuid('customer_id').notNull().references(() => customers.id, { onDelete: 'restrict' }),
+  actorUserId: text('actor_user_id'),
+  pointsDelta: integer('points_delta').notNull(),
+  eventType: text('event_type').notNull(),
+  sourceId: uuid('source_id').notNull(),
+  relatedSaleId: uuid('related_sale_id').references(() => sales.id, { onDelete: 'restrict' }),
+  idempotencyKey: text('idempotency_key').notNull(),
+  note: text('note'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  businessIdempotencyUnique: uniqueIndex('loyalty_ledger_business_idempotency_unique').on(t.businessId, t.idempotencyKey),
+  customerTimeIdx: index('loyalty_ledger_customer_time_idx').on(t.businessId, t.customerId, t.createdAt),
+  saleIdx: index('loyalty_ledger_sale_idx').on(t.businessId, t.relatedSaleId),
+  nonZeroDelta: check('loyalty_ledger_non_zero_delta', sql`${t.pointsDelta} <> 0`),
+  validEvent: check('loyalty_ledger_event_type_valid', sql`${t.eventType} IN ('SALE_EARN','RETURN_REVERSAL','SALE_CANCELLATION_REVERSAL','MANUAL_ADJUSTMENT')`),
+}));
+
 export const expenses = pgTable('expenses', {
   id: uuid('id').defaultRandom().primaryKey(),
   businessId: uuid('business_id').notNull().references(() => businesses.id),
+  locationId: uuid('location_id').notNull(),
   category: text('category').notNull(),
   description: text('description'),
   amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
@@ -510,6 +628,7 @@ export const receivables = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    locationId: uuid('location_id').notNull(),
     customerId: uuid('customer_id').notNull().references(() => customers.id),
     saleId: uuid('sale_id').notNull().references(() => sales.id, { onDelete: 'cascade' }),
     initialAmount: numeric('initial_amount', { precision: 14, scale: 2 }).notNull(),
@@ -535,6 +654,7 @@ export const payments = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    locationId: uuid('location_id').notNull(),
     customerId: uuid('customer_id').notNull().references(() => customers.id),
     saleId: uuid('sale_id').references(() => sales.id),
     receivableId: uuid('receivable_id').references(() => receivables.id),
@@ -622,3 +742,279 @@ export const offlineOperationsLog = pgTable(
   }),
 );
 
+
+
+/**
+ * ---------------------------------------------------------------------------
+ * PARTIE 8 — COMPTABILITÉ GÉNÉRALE SYSCOHADA (Phase 4)
+ * Les règles métier et la validation réglementaire résident dans le module
+ * accounting. Les montants des futures écritures utiliseront NUMERIC.
+ * ---------------------------------------------------------------------------
+ */
+export const accountingProfiles = pgTable(
+  'accounting_profiles',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'restrict' }),
+    countryCode: text('country_code').notNull().default('ML'),
+    framework: text('framework').notNull().default('SYSCOHADA_REVISED'),
+    accountingSystem: text('accounting_system').notNull().default('NORMAL'),
+    currency: text('currency').notNull().default('XOF'),
+    chartVersion: text('chart_version').notNull().default('SYSCOHADA_2017'),
+    configuredAt: timestamp('configured_at', { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessUnique: uniqueIndex('accounting_profiles_business_unique').on(t.businessId),
+    countryCheck: check('accounting_profiles_country_check', sql`${t.countryCode} ~ '^[A-Z]{2}$'`),
+    frameworkCheck: check('accounting_profiles_framework_check', sql`${t.framework} = 'SYSCOHADA_REVISED'`),
+    systemCheck: check('accounting_profiles_system_check', sql`${t.accountingSystem} IN ('NORMAL', 'SMT')`),
+    currencyCheck: check('accounting_profiles_currency_check', sql`${t.currency} ~ '^[A-Z]{3}$'`),
+  }),
+);
+
+export const accountingAccounts = pgTable(
+  'accounting_accounts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'restrict' }),
+    accountNumber: text('account_number').notNull(),
+    label: text('label').notNull(),
+    class: integer('class').notNull(),
+    parentAccountId: uuid('parent_account_id'),
+    normalBalance: text('normal_balance').notNull(),
+    isPostable: boolean('is_postable').notNull().default(true),
+    isActive: boolean('is_active').notNull().default(true),
+    sourceFramework: text('source_framework').notNull().default('SYSCOHADA_REVISED'),
+    sourceVersion: text('source_version').notNull().default('SYSCOHADA_2017'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessNumberUnique: uniqueIndex('accounting_accounts_business_number_unique').on(t.businessId, t.accountNumber),
+    businessIdIdUnique: uniqueIndex('accounting_accounts_business_id_id_unique').on(t.businessId, t.id),
+    businessClassIdx: index('accounting_accounts_business_class_idx').on(t.businessId, t.class, t.accountNumber),
+    businessParentIdx: index('accounting_accounts_business_parent_idx').on(t.businessId, t.parentAccountId),
+    classCheck: check('accounting_accounts_class_check', sql`${t.class} BETWEEN 1 AND 9`),
+    numberCheck: check('accounting_accounts_number_check', sql`${t.accountNumber} ~ '^[0-9]{1,20}$'`),
+    labelCheck: check('accounting_accounts_label_check', sql`length(btrim(${t.label})) BETWEEN 2 AND 180`),
+    balanceCheck: check('accounting_accounts_balance_check', sql`${t.normalBalance} IN ('DEBIT', 'CREDIT')`),
+    frameworkCheck: check('accounting_accounts_framework_check', sql`${t.sourceFramework} = 'SYSCOHADA_REVISED'`),
+    parentFk: foreignKey({
+      name: 'accounting_accounts_parent_fk',
+      columns: [t.businessId, t.parentAccountId],
+      foreignColumns: [t.businessId, t.id],
+    }),
+    noSelfParent: check('accounting_accounts_no_self_parent', sql`${t.parentAccountId} IS NULL OR ${t.parentAccountId} <> ${t.id}`),
+  }),
+);
+
+export const accountingFiscalYears = pgTable(
+  'accounting_fiscal_years',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'restrict' }),
+    code: text('code').notNull(),
+    label: text('label').notNull(),
+    startDate: date('start_date').notNull(),
+    endDate: date('end_date').notNull(),
+    status: text('status').notNull().default('OPEN'),
+    openedAt: timestamp('opened_at', { withTimezone: true }).defaultNow().notNull(),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessCodeUnique: uniqueIndex('accounting_fiscal_years_business_code_unique').on(t.businessId, t.code),
+    businessIdIdUnique: uniqueIndex('accounting_fiscal_years_business_id_id_unique').on(t.businessId, t.id),
+    businessDatesIdx: index('accounting_fiscal_years_business_dates_idx').on(t.businessId, t.startDate, t.endDate),
+    datesCheck: check('accounting_fiscal_years_dates_check', sql`${t.endDate} >= ${t.startDate}`),
+    statusCheck: check('accounting_fiscal_years_status_check', sql`${t.status} IN ('OPEN', 'CLOSING', 'CLOSED')`),
+  }),
+);
+
+export const accountingPeriods = pgTable(
+  'accounting_periods',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull(),
+    fiscalYearId: uuid('fiscal_year_id').notNull(),
+    code: text('code').notNull(),
+    label: text('label').notNull(),
+    startDate: date('start_date').notNull(),
+    endDate: date('end_date').notNull(),
+    status: text('status').notNull().default('OPEN'),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessCodeUnique: uniqueIndex('accounting_periods_business_code_unique').on(t.businessId, t.code),
+    businessIdIdUnique: uniqueIndex('accounting_periods_business_id_id_unique').on(t.businessId, t.id),
+    businessYearDatesIdx: index('accounting_periods_business_year_dates_idx').on(t.businessId, t.fiscalYearId, t.startDate, t.endDate),
+    datesCheck: check('accounting_periods_dates_check', sql`${t.endDate} >= ${t.startDate}`),
+    statusCheck: check('accounting_periods_status_check', sql`${t.status} IN ('OPEN', 'CLOSED', 'LOCKED')`),
+    fiscalYearFk: foreignKey({
+      name: 'accounting_periods_fiscal_year_fk',
+      columns: [t.businessId, t.fiscalYearId],
+      foreignColumns: [accountingFiscalYears.businessId, accountingFiscalYears.id],
+    }),
+  }),
+);
+
+export const accountingJournals = pgTable(
+  'accounting_journals',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'restrict' }),
+    locationId: uuid('location_id'),
+    code: text('code').notNull(),
+    label: text('label').notNull(),
+    journalType: text('journal_type').notNull(),
+    sequencePrefix: text('sequence_prefix').notNull(),
+    nextSequence: bigint('next_sequence', { mode: 'number' }).notNull().default(1),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessCodeUnique: uniqueIndex('accounting_journals_business_code_unique').on(t.businessId, t.code),
+    businessIdIdUnique: uniqueIndex('accounting_journals_business_id_id_unique').on(t.businessId, t.id),
+    businessTypeIdx: index('accounting_journals_business_type_idx').on(t.businessId, t.journalType, t.isActive),
+    sequenceCheck: check('accounting_journals_sequence_check', sql`${t.nextSequence} > 0`),
+    typeCheck: check('accounting_journals_type_check', sql`${t.journalType} IN ('PURCHASE', 'SALES', 'CASH', 'BANK', 'GENERAL', 'OPENING', 'CLOSING', 'PAYROLL')`),
+    locationFk: foreignKey({
+      name: 'accounting_journals_location_fk',
+      columns: [t.businessId, t.locationId],
+      foreignColumns: [businessLocations.businessId, businessLocations.id],
+    }),
+  }),
+);
+
+export const accountingEntries = pgTable(
+  'accounting_entries',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'restrict' }),
+    journalId: uuid('journal_id').notNull(),
+    periodId: uuid('period_id').notNull(),
+    locationId: uuid('location_id'),
+    entryNumber: text('entry_number').notNull(),
+    entryDate: date('entry_date').notNull(),
+    description: text('description').notNull(),
+    status: text('status').notNull().default('DRAFT'),
+    sourceType: text('source_type'),
+    sourceId: text('source_id'),
+    idempotencyKey: text('idempotency_key'),
+    requestHash: text('request_hash'),
+    reversalOfEntryId: uuid('reversal_of_entry_id'),
+    postedAt: timestamp('posted_at', { withTimezone: true }).defaultNow().notNull(),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessIdIdUnique: uniqueIndex('accounting_entries_business_id_id_unique').on(t.businessId, t.id),
+    businessNumberUnique: uniqueIndex('accounting_entries_business_number_unique').on(t.businessId, t.entryNumber),
+    sourceUnique: uniqueIndex('accounting_entries_source_unique').on(t.businessId, t.sourceType, t.sourceId),
+    idempotencyUnique: uniqueIndex('accounting_entries_idempotency_unique').on(t.businessId, t.idempotencyKey),
+    reversalUnique: uniqueIndex('accounting_entries_single_reversal_unique').on(t.businessId, t.reversalOfEntryId),
+    businessDateIdx: index('accounting_entries_business_date_idx').on(t.businessId, t.entryDate, t.id),
+    businessPeriodIdx: index('accounting_entries_business_period_idx').on(t.businessId, t.periodId, t.entryDate),
+    businessLocationDateIdx: index('accounting_entries_business_location_date_idx').on(t.businessId, t.locationId, t.entryDate),
+    journalFk: foreignKey({ name: 'accounting_entries_journal_fk', columns: [t.businessId, t.journalId], foreignColumns: [accountingJournals.businessId, accountingJournals.id] }),
+    periodFk: foreignKey({ name: 'accounting_entries_period_fk', columns: [t.businessId, t.periodId], foreignColumns: [accountingPeriods.businessId, accountingPeriods.id] }),
+    locationFk: foreignKey({ name: 'accounting_entries_location_fk', columns: [t.businessId, t.locationId], foreignColumns: [businessLocations.businessId, businessLocations.id] }),
+    reversalFk: foreignKey({ name: 'accounting_entries_reversal_fk', columns: [t.businessId, t.reversalOfEntryId], foreignColumns: [t.businessId, t.id] }),
+    statusCheck: check('accounting_entries_status_check', sql`${t.status} IN ('DRAFT', 'POSTED')`),
+    sourcePairCheck: check('accounting_entries_source_pair_check', sql`(${t.sourceType} IS NULL) = (${t.sourceId} IS NULL)`),
+    descriptionCheck: check('accounting_entries_description_check', sql`length(btrim(${t.description})) BETWEEN 2 AND 240`),
+  }),
+);
+
+export const accountingEntryLines = pgTable(
+  'accounting_entry_lines',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull(),
+    entryId: uuid('entry_id').notNull(),
+    lineNumber: integer('line_number').notNull(),
+    accountId: uuid('account_id').notNull(),
+    description: varchar('description', { length: 240 }),
+    customerId: uuid('customer_id'),
+    supplierId: uuid('supplier_id'),
+    debit: numeric('debit', { precision: 18, scale: 2 }).notNull().default('0'),
+    credit: numeric('credit', { precision: 18, scale: 2 }).notNull().default('0'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    entryLineUnique: uniqueIndex('accounting_entry_lines_entry_line_unique').on(t.entryId, t.lineNumber),
+    businessAccountIdx: index('accounting_entry_lines_business_account_idx').on(t.businessId, t.accountId, t.entryId),
+    entryFk: foreignKey({ name: 'accounting_entry_lines_entry_fk', columns: [t.businessId, t.entryId], foreignColumns: [accountingEntries.businessId, accountingEntries.id] }),
+    accountFk: foreignKey({ name: 'accounting_entry_lines_account_fk', columns: [t.businessId, t.accountId], foreignColumns: [accountingAccounts.businessId, accountingAccounts.id] }),
+    customerFk: foreignKey({ name: 'accounting_entry_lines_customer_fk', columns: [t.businessId, t.customerId], foreignColumns: [customers.businessId, customers.id] }),
+    supplierFk: foreignKey({ name: 'accounting_entry_lines_supplier_fk', columns: [t.businessId, t.supplierId], foreignColumns: [suppliers.businessId, suppliers.id] }),
+    customerIdx: index('accounting_entry_lines_customer_idx').on(t.businessId, t.customerId, t.entryId),
+    supplierIdx: index('accounting_entry_lines_supplier_idx').on(t.businessId, t.supplierId, t.entryId),
+    auxiliaryCheck: check('accounting_entry_lines_single_auxiliary_check', sql`${t.customerId} IS NULL OR ${t.supplierId} IS NULL`),
+    lineNumberCheck: check('accounting_entry_lines_line_number_check', sql`${t.lineNumber} > 0`),
+    amountsCheck: check('accounting_entry_lines_amounts_check', sql`${t.debit} >= 0 AND ${t.credit} >= 0 AND ((${t.debit} > 0 AND ${t.credit} = 0) OR (${t.credit} > 0 AND ${t.debit} = 0))`),
+  }),
+);
+
+
+/** Explicit, tenant-owned posting rules for operational accounting events. */
+export const accountingEventMappings = pgTable(
+  'accounting_event_mappings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull(),
+    sourceType: text('source_type').notNull(),
+    sourceCategory: text('source_category').notNull(),
+    journalId: uuid('journal_id').notNull(),
+    debitAccountId: uuid('debit_account_id'),
+    creditAccountId: uuid('credit_account_id'),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    businessCategoryUnique: uniqueIndex('accounting_event_mappings_business_category_unique').on(t.businessId, t.sourceType, t.sourceCategory),
+    businessIdIdUnique: uniqueIndex('accounting_event_mappings_business_id_id_unique').on(t.businessId, t.id),
+    journalFk: foreignKey({ name: 'accounting_event_mappings_journal_fk', columns: [t.businessId, t.journalId], foreignColumns: [accountingJournals.businessId, accountingJournals.id] }),
+    debitAccountFk: foreignKey({ name: 'accounting_event_mappings_debit_account_fk', columns: [t.businessId, t.debitAccountId], foreignColumns: [accountingAccounts.businessId, accountingAccounts.id] }),
+    creditAccountFk: foreignKey({ name: 'accounting_event_mappings_credit_account_fk', columns: [t.businessId, t.creditAccountId], foreignColumns: [accountingAccounts.businessId, accountingAccounts.id] }),
+    distinctAccounts: check('accounting_event_mappings_distinct_accounts_check', sql`${t.debitAccountId} <> ${t.creditAccountId}`),
+    sourceTypeCheck: check('accounting_event_mappings_source_type_check', sql`${t.sourceType} IN ('EXPENSE', 'SALE', 'PURCHASE', 'PAYMENT', 'RETURN')`),
+    categoryCheck: check('accounting_event_mappings_category_check', sql`length(btrim(${t.sourceCategory})) BETWEEN 1 AND 80`),
+  }),
+);
+
+
+/** Ordered debit/credit lines for a tenant-owned operational posting template. */
+export const accountingEventMappingLines = pgTable(
+  'accounting_event_mapping_lines',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull(),
+    mappingId: uuid('mapping_id').notNull(),
+    lineNumber: integer('line_number').notNull(),
+    accountId: uuid('account_id').notNull(),
+    side: text('side').notNull(),
+    amountBasis: text('amount_basis').notNull(),
+    percentage: numeric('percentage', { precision: 7, scale: 4 }).notNull().default('100.0000'),
+    auxiliaryType: text('auxiliary_type'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    mappingLineUnique: uniqueIndex('accounting_event_mapping_lines_unique').on(t.businessId, t.mappingId, t.lineNumber),
+    businessMappingIdx: index('accounting_event_mapping_lines_business_mapping_idx').on(t.businessId, t.mappingId, t.lineNumber),
+    mappingFk: foreignKey({ name: 'accounting_event_mapping_lines_mapping_fk', columns: [t.businessId, t.mappingId], foreignColumns: [accountingEventMappings.businessId, accountingEventMappings.id] }).onDelete('cascade'),
+    accountFk: foreignKey({ name: 'accounting_event_mapping_lines_account_fk', columns: [t.businessId, t.accountId], foreignColumns: [accountingAccounts.businessId, accountingAccounts.id] }),
+    lineNumberCheck: check('accounting_event_mapping_lines_number_check', sql`${t.lineNumber} > 0`),
+    sideCheck: check('accounting_event_mapping_lines_side_check', sql`${t.side} IN ('DEBIT', 'CREDIT')`),
+    amountBasisCheck: check('accounting_event_mapping_lines_basis_check', sql`${t.amountBasis} IN ('EXPENSE_AMOUNT', 'SALE_TOTAL', 'SALE_SUBTOTAL', 'SALE_DISCOUNT', 'SALE_COST_AT_SALE', 'PURCHASE_TOTAL', 'PAYMENT_AMOUNT', 'RETURN_TOTAL', 'RETURN_RESTOCK_COST', 'RETURN_DAMAGED_COST')`),
+    percentageCheck: check('accounting_event_mapping_lines_percentage_check', sql`${t.percentage} > 0 AND ${t.percentage} <= 100`),
+    auxiliaryCheck: check('accounting_event_mapping_lines_auxiliary_check', sql`${t.auxiliaryType} IS NULL OR ${t.auxiliaryType} IN ('CUSTOMER', 'SUPPLIER')`),
+  }),
+);

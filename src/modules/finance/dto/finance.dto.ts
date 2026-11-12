@@ -85,6 +85,15 @@ export class CreateReceivableFromSaleDto {
   amountPaidNow!: number;
 
   @IsOptional()
+  @IsEnum(PaymentMethodEnum)
+  paymentMethod?: PaymentMethodEnum;
+
+  @IsOptional()
+  @IsString()
+  @Length(2, 100)
+  transactionReference?: string;
+
+  @IsOptional()
   @IsDateString()
   dueDate?: string;
 

@@ -6,6 +6,9 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
   let mockDb: any;
   let mockFinanceService: any;
   let mockOutboxService: any;
+  let mockAccountingPosting: any;
+  let mockLoyaltyLedger: any;
+  let mockInventoryValuation: any;
   let syncService: SyncService;
 
   const mockTenant: Tenant = {
@@ -23,6 +26,13 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
       enqueue: jest.fn().mockResolvedValue({ id: 'outbox-sync-1' }),
     };
 
+    mockAccountingPosting = {
+      postSale: jest.fn().mockResolvedValue({ status: 'NOT_CONFIGURED', entryId: null }),
+      postExpense: jest.fn().mockResolvedValue({ status: 'NOT_CONFIGURED', entryId: null }),
+    };
+    mockLoyaltyLedger = { awardForSale: jest.fn().mockResolvedValue(20) };
+    mockInventoryValuation = { consume: jest.fn().mockResolvedValue('2500.00') };
+
     mockDb = {
       db: {
         select: jest.fn(),
@@ -33,7 +43,7 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
       },
     };
 
-    syncService = new SyncService(mockDb, mockFinanceService, mockOutboxService);
+    syncService = new SyncService(mockDb, mockFinanceService, mockOutboxService, mockAccountingPosting, mockLoyaltyLedger, mockInventoryValuation);
   });
 
   describe('Device Registration & Sync Status', () => {
@@ -84,6 +94,7 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
       mockDb.db.select
         .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([]) }) }) // customer idempotency check
         .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([]) }) }) // sale idempotency check
+        .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve([{ id: 'location-main' }]) }) }) // active default location
         .mockReturnValueOnce({
           from: () => ({
             where: () => ({
@@ -95,7 +106,7 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
           from: () => ({
             innerJoin: () => ({
               where: () => ({
-                limit: () => Promise.resolve([{ id: 'var-1' }]),
+                limit: () => Promise.resolve([{ id: 'var-1', sellingPrice: '5000.00', purchasePrice: '2500.00' }]),
               }),
             }),
           }),
@@ -122,8 +133,10 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
             }),
           }),
         })
-        // SaleItem insert
-        .mockReturnValueOnce({ values: jest.fn().mockResolvedValue([]) })
+        // SaleItem insert with server-owned catalog price and cost snapshots
+        .mockReturnValueOnce({ values: jest.fn().mockReturnValue({ returning: jest.fn().mockResolvedValue([{
+          id: 'sale-item-offline-1', variantId: 'var-1', quantity: 2, unitPrice: '5000.00', costAtSale: '2500.00',
+        }]) }) })
         // Stock upsert decrement
         .mockReturnValueOnce({
           values: jest.fn().mockReturnValue({
@@ -157,7 +170,7 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
               customerId: 'cust-offline-1',
               subtotal: 10000,
               total: 10000,
-              items: [{ variantId: 'var-1', quantity: 2, unitPrice: 5000 }],
+              items: [{ variantId: 'var-1', quantity: 2, unitPrice: 5000, costAtSale: 0.01 }],
             },
           },
           {
@@ -185,6 +198,13 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
       expect(result.results.length).toBe(3);
       expect(result.results.every((r) => r.status === 'COMMITTED')).toBe(true);
       expect(mockFinanceService.recordPayment).toHaveBeenCalled();
+      expect(mockInventoryValuation.consume).toHaveBeenCalledWith(expect.anything(), mockTenant.businessId, 'var-1', 2);
+      expect(mockAccountingPosting.postSale).toHaveBeenCalledWith(expect.anything(), mockTenant, expect.objectContaining({ id: 'sale-offline-1' }), [
+        expect.objectContaining({ unitPrice: '5000.00', costAtSale: '2500.00' }),
+      ]);
+      expect(mockLoyaltyLedger.awardForSale).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        businessId: mockTenant.businessId, customerId: 'cust-offline-1', saleId: 'sale-offline-1',
+      }));
     });
 
     it('returns cached COMMITTED response without duplicate writes when operation is replayed', async () => {

@@ -6,6 +6,7 @@ import { Tenant } from '../auth/tenant.type';
 describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)', () => {
   let mockDb: any;
   let mockOutboxService: any;
+  let mockAuditEventsService: any;
   let financeService: FinanceService;
 
   const mockTenant: Tenant = {
@@ -26,6 +27,13 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
     mockOutboxService = {
       enqueue: jest.fn().mockResolvedValue({ id: 'outbox-1', deduplicationKey: 'key-1' }),
     };
+    mockAuditEventsService = {
+      appendInTransaction: jest.fn().mockResolvedValue('audit-event-1'),
+    };
+    const mockAccountingPosting = {
+      postPayment: jest.fn().mockResolvedValue({ status: 'NOT_CONFIGURED', entryId: null }),
+      reverseSourceInTransaction: jest.fn().mockResolvedValue({ status: 'NOT_CONFIGURED', reversalEntryId: null }),
+    };
 
     mockDb = {
       db: {
@@ -36,7 +44,7 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
       },
     };
 
-    financeService = new FinanceService(mockDb, mockOutboxService);
+    financeService = new FinanceService(mockDb, mockAccountingPosting as any, mockOutboxService, mockAuditEventsService);
   });
 
   describe('Settlement Modes (Integral, Partial & Deferred)', () => {
@@ -86,16 +94,39 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
         }),
       });
 
+      const recordPayment = jest.spyOn(financeService, 'recordPayment').mockResolvedValue({
+        id: 'payment-initial-1',
+        amount: '40000.00',
+        paymentMethod: PaymentMethodEnum.CASH,
+      } as any);
+      mockDb.db.select.mockReturnValueOnce({
+        from: () => ({
+          where: () => ({ limit: () => Promise.resolve([{
+            id: 'rec-1',
+            businessId: mockTenant.businessId,
+            customerId: mockCustomer.id,
+            saleId: 'sale-1',
+            initialAmount: '100000.00',
+            paidAmount: '40000.00',
+            remainingBalance: '60000.00',
+            status: 'PARTIALLY_PAID',
+          }]) }),
+        }),
+      });
+
       const rec = await financeService.createReceivableForSale(mockTenant, {
         saleId: 'sale-1',
         customerId: mockCustomer.id,
         totalAmount: 100000,
         amountPaidNow: 40000,
+        paymentMethod: PaymentMethodEnum.CASH,
         dueDate: '2026-12-01T00:00:00.000Z',
       });
 
       expect(rec.remainingBalance).toBe('60000.00');
       expect(rec.status).toBe('PARTIALLY_PAID');
+      expect(rec.initialPayment).toMatchObject({ id: 'payment-initial-1' });
+      expect(recordPayment).toHaveBeenCalledWith(mockTenant, expect.objectContaining({ amount: 40000, paymentMethod: PaymentMethodEnum.CASH }), expect.anything());
       expect(mockOutboxService.enqueue).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ eventType: 'receivable.created' }),
@@ -126,6 +157,20 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
         .mockReturnValueOnce({
           from: () => ({
             where: () => ({ limit: () => Promise.resolve([]) }),
+          }),
+        })
+        .mockReturnValueOnce({
+          from: () => ({
+            where: () => ({ limit: () => Promise.resolve([{
+              id: 'rec-deferred',
+              businessId: mockTenant.businessId,
+              customerId: mockCustomer.id,
+              saleId: 'sale-2',
+              initialAmount: '100000.00',
+              paidAmount: '0.00',
+              remainingBalance: '100000.00',
+              status: 'PENDING',
+            }]) }),
           }),
         });
 
@@ -183,6 +228,10 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
           from: () => ({
             where: () => ({ for: () => Promise.resolve([existingReceivable]) }),
           }),
+        })
+        // 3. Default location fallback when the receivable fixture has no location.
+        .mockReturnValueOnce({
+          from: () => ({ where: () => Promise.resolve([{ id: 'location-main' }]) }),
         });
 
       // 3. Insert payment

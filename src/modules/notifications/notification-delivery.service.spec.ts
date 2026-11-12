@@ -36,7 +36,9 @@ describe('NotificationDeliveryService', () => {
       trigger: jest.fn().mockResolvedValue(undefined),
     } as unknown as NovuNotificationOrchestrator;
     const expo = { sendEventToDevices: jest.fn() } as unknown as PushNotificationsService;
-    const delivery = new NotificationDeliveryService(database, novu, expo);
+    const delivery = new NotificationDeliveryService(database, novu, expo, {
+      run: (_context: unknown, work: () => Promise<void>) => work(),
+    } as any);
 
     await delivery.deliver(event);
 
@@ -73,7 +75,9 @@ describe('NotificationDeliveryService', () => {
     const database = { db: { select } } as unknown as DatabaseService;
     const novu = { isConfigured: false } as unknown as NovuNotificationOrchestrator;
     const expo = { sendEventToDevices: jest.fn().mockResolvedValue(undefined) } as unknown as PushNotificationsService;
-    const delivery = new NotificationDeliveryService(database, novu, expo);
+    const delivery = new NotificationDeliveryService(database, novu, expo, {
+      run: (_context: unknown, work: () => Promise<void>) => work(),
+    } as any);
 
     await delivery.deliver(event);
 
@@ -88,7 +92,9 @@ describe('NotificationDeliveryService', () => {
     const database = { db: { select } } as unknown as DatabaseService;
     const novu = { isConfigured: true, trigger: jest.fn() } as unknown as NovuNotificationOrchestrator;
     const expo = { sendEventToDevices: jest.fn() } as unknown as PushNotificationsService;
-    const delivery = new NotificationDeliveryService(database, novu, expo);
+    const delivery = new NotificationDeliveryService(database, novu, expo, {
+      run: (_context: unknown, work: () => Promise<void>) => work(),
+    } as any);
 
     await delivery.deliver(event);
 
@@ -105,7 +111,9 @@ describe('NotificationDeliveryService', () => {
     const database = { db: { select } } as unknown as DatabaseService;
     const novu = { isConfigured: true, trigger: jest.fn() } as unknown as NovuNotificationOrchestrator;
     const expo = { sendEventToDevices: jest.fn() } as unknown as PushNotificationsService;
-    const delivery = new NotificationDeliveryService(database, novu, expo);
+    const delivery = new NotificationDeliveryService(database, novu, expo, {
+      run: (_context: unknown, work: () => Promise<void>) => work(),
+    } as any);
 
     await delivery.deliver({
       ...event,

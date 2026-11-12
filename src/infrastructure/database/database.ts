@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm';
 import { drizzle, NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import * as schema from './schema';
+import { TenantDatabaseContext } from './tenant-database-context';
 
 /**
  * ROUND 2 FIX: this file used to read `process.env.DATABASE_URL` directly,
@@ -17,20 +18,28 @@ import * as schema from './schema';
 @Injectable()
 export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   readonly pool: Pool;
-  readonly db: NodePgDatabase<typeof schema>;
+  readonly baseDb: NodePgDatabase<typeof schema>;
 
-  constructor(private readonly config: ConfigService) {
+  /** Uses the request-local transaction when a verified tenant context exists. */
+  get db(): NodePgDatabase<typeof schema> {
+    return (this.tenantDatabaseContext.current as NodePgDatabase<typeof schema> | undefined) ?? this.baseDb;
+  }
+
+  constructor(
+    private readonly config: ConfigService,
+    private readonly tenantDatabaseContext: TenantDatabaseContext,
+  ) {
     this.pool = new Pool({
       connectionString: this.config.get<string>('DATABASE_URL'),
       max: 10,
       idleTimeoutMillis: 30_000,
     });
-    this.db = drizzle(this.pool, { schema });
+    this.baseDb = drizzle(this.pool, { schema });
   }
 
   async onModuleInit(): Promise<void> {
     if (this.configIsProduction()) {
-      const result = await this.db.execute(sql`
+      const result = await this.baseDb.execute(sql`
         SELECT count(*)::int AS trigger_count
         FROM pg_trigger
         WHERE tgrelid = 'users'::regclass

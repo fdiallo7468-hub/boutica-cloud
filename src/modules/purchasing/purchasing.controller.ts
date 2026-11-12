@@ -1,3 +1,5 @@
+import { PERMISSIONS } from '../auth/permissions/permission-catalog';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import { Body, Controller, Get, Headers, HttpCode, HttpStatus, NotFoundException, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { and, count, desc, eq, gte, lte } from 'drizzle-orm';
@@ -17,6 +19,7 @@ export class PurchasingController {
     private readonly db: DatabaseService,
   ) {}
 
+  @RequirePermissions(PERMISSIONS.PURCHASING_MANAGE)
   @Post('receive')
   @HttpCode(HttpStatus.CREATED)
   async receive(@CurrentTenant() tenant: Tenant, @Body() body: ReceivePurchaseDto, @Headers('idempotency-key') idempotencyKey?: string) {
@@ -27,6 +30,7 @@ export class PurchasingController {
   // NEW (v2.1, client-integration audit P0 §6) — same reasoning as
   // sales.controller.ts's list()/get(): thin, read-only, no invariant to
   // protect, so no use-case layer added for this.
+  @RequirePermissions(PERMISSIONS.PURCHASING_READ)
   @Get()
   async list(@CurrentTenant() tenant: Tenant, @Query() query: ListPurchasesQueryDto) {
     const filters = [eq(purchases.businessId, tenant.businessId)];
@@ -48,6 +52,7 @@ export class PurchasingController {
     return { data, page: query.page, pageSize: query.pageSize, total };
   }
 
+  @RequirePermissions(PERMISSIONS.PURCHASING_READ)
   @Get(':id')
   async get(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) id: string) {
     const [purchase] = await this.db.db

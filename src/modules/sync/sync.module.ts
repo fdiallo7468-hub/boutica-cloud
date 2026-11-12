@@ -2,11 +2,14 @@ import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../../infrastructure/database/database.module';
 import { FinanceModule } from '../finance/finance.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { LoyaltyModule } from '../loyalty/loyalty.module';
+import { AccountingModule } from '../accounting/accounting.module';
+import { InventoryModule } from '../inventory/inventory.module';
 import { SyncController } from './sync.controller';
 import { SyncService } from './sync.service';
 
 @Module({
-  imports: [DatabaseModule, FinanceModule, NotificationsModule],
+  imports: [DatabaseModule, FinanceModule, NotificationsModule, LoyaltyModule, AccountingModule, InventoryModule],
   controllers: [SyncController],
   providers: [SyncService],
   exports: [SyncService],

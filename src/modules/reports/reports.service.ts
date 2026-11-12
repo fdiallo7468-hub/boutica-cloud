@@ -4,6 +4,8 @@ import ExcelJS from 'exceljs';
 import puppeteer, { type Browser, type Page, type LaunchOptions } from 'puppeteer';
 import { DatabaseService } from '../../infrastructure/database/database';
 import {
+  inventoryBalances,
+  inventoryValuations,
   products,
   saleItems,
   sales,
@@ -29,12 +31,13 @@ export class ReportsService {
 
   // --- EXCEL EXPORTS ---
 
-  async exportSalesExcel(businessId: string, from: Date, to: Date): Promise<Buffer> {
+  async exportSalesExcel(businessId: string, from: Date, to: Date, locationId?: string): Promise<Buffer> {
     const rows = await this.db.db
       .select({
         saleId: sales.id,
         createdAt: sales.createdAt,
         total: sales.total,
+        saleTotal: sales.total,
         status: sales.status,
         productName: products.name,
         variantName: variants.name,
@@ -52,6 +55,7 @@ export class ReportsService {
           eq(sales.status, 'COMPLETED'),
           gte(sales.createdAt, from),
           lte(sales.createdAt, to),
+          ...(locationId ? [eq(sales.locationId, locationId)] : []),
         ),
       )
       .orderBy(desc(sales.createdAt));
@@ -82,10 +86,10 @@ export class ReportsService {
       fgColor: { argb: 'FF4F46E5' },
     };
 
-    let totalGlobal = 0;
+    const totalBySale = new Map<string, number>();
     for (const r of rows) {
       const lineTotal = Number(r.unitPrice) * r.quantity;
-      totalGlobal += lineTotal;
+      totalBySale.set(r.saleId, Number(r.saleTotal));
       sheet.addRow({
         saleId: r.saleId,
         date: r.createdAt ? new Date(r.createdAt).toLocaleString('fr-FR') : '',
@@ -98,8 +102,9 @@ export class ReportsService {
       });
     }
 
+    const totalGlobal = [...totalBySale.values()].reduce((sum, value) => sum + value, 0);
     const totalRow = sheet.addRow({
-      product: 'TOTAL',
+      product: 'TOTAL VENTES (après remises)',
       lineTotal: totalGlobal,
     });
     totalRow.font = { bold: true };
@@ -108,8 +113,14 @@ export class ReportsService {
     return Buffer.from(arrayBuffer);
   }
 
-  async exportInventoryExcel(businessId: string): Promise<Buffer> {
-    const items = await this.db.db
+  async exportInventoryExcel(businessId: string, locationId?: string): Promise<Buffer> {
+    const items = locationId ? await this.db.db
+      .select({ productId: products.id, productName: products.name, variantId: variants.id, variantName: variants.name, sku: variants.sku, quantity: inventoryBalances.quantity, cost: inventoryValuations.averageUnitCost, price: variants.sellingPrice })
+      .from(inventoryBalances).innerJoin(variants, and(eq(inventoryBalances.variantId, variants.id), eq(inventoryBalances.businessId, variants.businessId)))
+      .leftJoin(inventoryValuations, and(eq(inventoryValuations.businessId, inventoryBalances.businessId), eq(inventoryValuations.variantId, inventoryBalances.variantId)))
+      .innerJoin(products, eq(variants.productId, products.id))
+      .where(and(eq(inventoryBalances.businessId, businessId), eq(inventoryBalances.locationId, locationId)))
+      .orderBy(products.name, variants.name) : await this.db.db
       .select({
         productId: products.id,
         productName: products.name,
@@ -117,11 +128,12 @@ export class ReportsService {
         variantName: variants.name,
         sku: variants.sku,
         quantity: stock.quantity,
-        cost: variants.purchasePrice,
+        cost: inventoryValuations.averageUnitCost,
         price: variants.sellingPrice,
       })
       .from(stock)
-      .innerJoin(variants, eq(stock.variantId, variants.id))
+      .innerJoin(variants, and(eq(stock.variantId, variants.id), eq(stock.businessId, variants.businessId)))
+      .leftJoin(inventoryValuations, and(eq(inventoryValuations.businessId, stock.businessId), eq(inventoryValuations.variantId, stock.variantId)))
       .innerJoin(products, eq(variants.productId, products.id))
       .where(eq(stock.businessId, businessId))
       .orderBy(products.name, variants.name);
@@ -148,25 +160,32 @@ export class ReportsService {
     };
 
     let totalVal = 0;
+    let unvaluedVariants = 0;
     for (const item of items) {
-      const val = Number(item.cost) * item.quantity;
-      totalVal += val;
+      const unitCost = item.cost === null ? null : Number(item.cost);
+      const val = unitCost === null ? null : unitCost * item.quantity;
+      if (val === null) unvaluedVariants += 1;
+      else totalVal += val;
       sheet.addRow({
         product: item.productName,
         variant: item.variantName,
         sku: item.sku,
         quantity: item.quantity,
-        cost: Number(item.cost),
+        cost: unitCost === null ? 'Non valorisé' : unitCost,
         price: Number(item.price),
-        stockValue: val,
+        stockValue: val === null ? 'Non valorisé' : val,
       });
     }
 
     const totalRow = sheet.addRow({
-      product: 'TOTAL VALEUR DU STOCK',
+      product: 'TOTAL VALEUR DU STOCK (CUMP VALORISÉ)',
       stockValue: totalVal,
     });
     totalRow.font = { bold: true };
+    if (unvaluedVariants > 0) {
+      const unvaluedRow = sheet.addRow({ product: 'VARIANTES NON VALORISÉES', stockValue: unvaluedVariants });
+      unvaluedRow.font = { bold: true };
+    }
 
     const arrayBuffer = await workbook.xlsx.writeBuffer();
     return Buffer.from(arrayBuffer);
@@ -174,7 +193,7 @@ export class ReportsService {
 
   // --- PDF EXPORTS (Puppeteer) ---
 
-  async exportSalesPdf(businessId: string, from: Date, to: Date): Promise<Buffer> {
+  async exportSalesPdf(businessId: string, from: Date, to: Date, locationId?: string): Promise<Buffer> {
     const rows = await this.db.db
       .select({
         saleId: sales.id,
@@ -189,6 +208,7 @@ export class ReportsService {
           eq(sales.status, 'COMPLETED'),
           gte(sales.createdAt, from),
           lte(sales.createdAt, to),
+          ...(locationId ? [eq(sales.locationId, locationId)] : []),
         ),
       )
       .orderBy(desc(sales.createdAt));
@@ -263,8 +283,13 @@ export class ReportsService {
     return this.renderHtmlToPdf(html);
   }
 
-  async exportInventoryPdf(businessId: string): Promise<Buffer> {
-    const items = await this.db.db
+  async exportInventoryPdf(businessId: string, locationId?: string): Promise<Buffer> {
+    const items = locationId ? await this.db.db
+      .select({ productName: products.name, variantName: variants.name, sku: variants.sku, quantity: inventoryBalances.quantity, price: variants.sellingPrice })
+      .from(inventoryBalances).innerJoin(variants, and(eq(inventoryBalances.variantId, variants.id), eq(inventoryBalances.businessId, variants.businessId)))
+      .innerJoin(products, eq(variants.productId, products.id))
+      .where(and(eq(inventoryBalances.businessId, businessId), eq(inventoryBalances.locationId, locationId)))
+      .orderBy(inventoryBalances.quantity) : await this.db.db
       .select({
         productName: products.name,
         variantName: variants.name,

@@ -38,6 +38,44 @@ describe('Sales (e2e)', () => {
     expect(stockRes.body.quantity).toBe(7);
   });
 
+  it('cancels an unpaid sale atomically, restores stock and reverses loyalty points exactly once', async () => {
+    const { accessToken } = await registerBusiness(app);
+    const { variantId } = await createProductWithVariant(app, accessToken, { sellingPrice: 500 });
+    await adjustStock(app, accessToken, variantId, 10);
+    const customer = await request(app.getHttpServer())
+      .post('/api/v1/customers').set('Authorization', `Bearer ${accessToken}`)
+      .send({ name: 'Cancellation loyalty customer' }).expect(201);
+    await request(app.getHttpServer())
+      .put('/api/v1/loyalty/configuration').set('Authorization', `Bearer ${accessToken}`)
+      .send({ enabled: true, earnPointsPer1000: 2 }).expect(200);
+    const sale = await request(app.getHttpServer())
+      .post('/api/v1/sales').set('Authorization', `Bearer ${accessToken}`)
+      .send({ items: [{ variantId, quantity: 2 }], customerId: customer.body.id }).expect(201);
+    const before = await request(app.getHttpServer())
+      .get(`/api/v1/loyalty/customers/${customer.body.id}`).set('Authorization', `Bearer ${accessToken}`).expect(200);
+    expect(before.body.pointsBalance).toBe(2);
+
+    const cancelled = await request(app.getHttpServer())
+      .post(`/api/v1/sales/${sale.body.id}/cancel`).set('Authorization', `Bearer ${accessToken}`).expect(200);
+    expect(cancelled.body).toMatchObject({ id: sale.body.id, status: 'CANCELLED', alreadyCancelled: false });
+    const stockAfter = await request(app.getHttpServer())
+      .get(`/api/v1/inventory/${variantId}`).set('Authorization', `Bearer ${accessToken}`).expect(200);
+    expect(stockAfter.body.quantity).toBe(10);
+    const after = await request(app.getHttpServer())
+      .get(`/api/v1/loyalty/customers/${customer.body.id}`).set('Authorization', `Bearer ${accessToken}`).expect(200);
+    expect(after.body.pointsBalance).toBe(0);
+    expect(after.body.ledger.map((entry: { eventType: string; pointsDelta: number }) => entry.eventType))
+      .toEqual(['SALE_CANCELLATION_REVERSAL', 'SALE_EARN']);
+
+    const retry = await request(app.getHttpServer())
+      .post(`/api/v1/sales/${sale.body.id}/cancel`).set('Authorization', `Bearer ${accessToken}`).expect(200);
+    expect(retry.body.alreadyCancelled).toBe(true);
+    const afterRetry = await request(app.getHttpServer())
+      .get(`/api/v1/loyalty/customers/${customer.body.id}`).set('Authorization', `Bearer ${accessToken}`).expect(200);
+    expect(afterRetry.body.pointsBalance).toBe(0);
+    expect(afterRetry.body.ledger).toHaveLength(2);
+  });
+
   it('rejects a sale when requested quantity exceeds available stock', async () => {
     const { accessToken } = await registerBusiness(app);
     const { variantId } = await createProductWithVariant(app, accessToken, { sellingPrice: 10 });
@@ -226,6 +264,74 @@ describe('Sales (e2e)', () => {
 
     it('rejects an unauthenticated request', async () => {
       await request(app.getHttpServer()).get('/api/v1/sales').expect(401);
+    });
+  });
+
+  describe('GET /api/v1/customers/:id/summary', () => {
+    it('returns paginated customer purchase history with tenant and location filters', async () => {
+      const { accessToken } = await registerBusiness(app);
+      const { variantId } = await createProductWithVariant(app, accessToken, { sellingPrice: 25 });
+      await adjustStock(app, accessToken, variantId, 10);
+      const customer = await request(app.getHttpServer())
+        .post('/api/v1/customers').set('Authorization', `Bearer ${accessToken}`)
+        .send({ name: 'History customer' }).expect(201);
+      const sale = await request(app.getHttpServer())
+        .post('/api/v1/sales').set('Authorization', `Bearer ${accessToken}`)
+        .send({ items: [{ variantId, quantity: 2 }], customerId: customer.body.id }).expect(201);
+      const history = await request(app.getHttpServer())
+        .get(`/api/v1/customers/${customer.body.id}/history?limit=10&offset=0`)
+        .set('Authorization', `Bearer ${accessToken}`).expect(200);
+      expect(history.body).toMatchObject({ customerId: customer.body.id, total: 1, limit: 10, offset: 0 });
+      expect(history.body.data[0].id).toBe(sale.body.id);
+      const locationFiltered = await request(app.getHttpServer())
+        .get(`/api/v1/customers/${customer.body.id}/history?locationId=${sale.body.locationId}`)
+        .set('Authorization', `Bearer ${accessToken}`).expect(200);
+      expect(locationFiltered.body.total).toBe(1);
+    });
+
+    it('returns tenant-scoped lifetime metrics from completed sales', async () => {
+      const { accessToken } = await registerBusiness(app);
+      const { variantId } = await createProductWithVariant(app, accessToken, { sellingPrice: 25 });
+      await adjustStock(app, accessToken, variantId, 10);
+      const customer = await request(app.getHttpServer())
+        .post('/api/v1/customers')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ name: 'Aminata' })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post('/api/v1/sales')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ items: [{ variantId, quantity: 2 }], customerId: customer.body.id })
+        .expect(201);
+
+      const summary = await request(app.getHttpServer())
+        .get(`/api/v1/customers/${customer.body.id}/summary`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      expect(summary.body).toMatchObject({
+        customerId: customer.body.id,
+        completedSalesCount: 1,
+        lifetimeValue: '50.00',
+        averageBasket: '50.00',
+      });
+      expect(summary.body.lastPurchaseAt).toBeTruthy();
+    });
+
+    it('does not reveal a customer summary from another business', async () => {
+      const first = await registerBusiness(app);
+      const second = await registerBusiness(app);
+      const customer = await request(app.getHttpServer())
+        .post('/api/v1/customers')
+        .set('Authorization', `Bearer ${first.accessToken}`)
+        .send({ name: 'Tenant A customer' })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .get(`/api/v1/customers/${customer.body.id}/summary`)
+        .set('Authorization', `Bearer ${second.accessToken}`)
+        .expect(404);
     });
   });
 

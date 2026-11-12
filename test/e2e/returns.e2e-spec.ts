@@ -26,6 +26,61 @@ describe('Returns (e2e)', () => {
     return { saleId: res.body.id as string, saleItemId: res.body.items[0].id as string };
   }
 
+  it('awards loyalty points on completed sales and reverses them proportionally on returns', async () => {
+    const { accessToken } = await registerBusiness(app);
+    const { variantId } = await createProductWithVariant(app, accessToken, { sellingPrice: 500 });
+    await adjustStock(app, accessToken, variantId, 10);
+    const customer = await request(app.getHttpServer())
+      .post('/api/v1/customers')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ name: 'Loyalty customer' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .put('/api/v1/loyalty/configuration')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ enabled: true, earnPointsPer1000: 2, minimumRedemptionPoints: 10 })
+      .expect(200);
+
+    const sale = await request(app.getHttpServer())
+      .post('/api/v1/sales')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ items: [{ variantId, quantity: 2 }], customerId: customer.body.id })
+      .expect(201);
+    expect(sale.body.total).toBe('1000.00');
+
+    const earned = await request(app.getHttpServer())
+      .get(`/api/v1/loyalty/customers/${customer.body.id}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    expect(earned.body.pointsBalance).toBe(2);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/returns')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ saleId: sale.body.id, items: [{ saleItemId: sale.body.items[0].id, quantity: 1 }] })
+      .expect(201);
+
+    const afterReturn = await request(app.getHttpServer())
+      .get(`/api/v1/loyalty/customers/${customer.body.id}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    expect(afterReturn.body.pointsBalance).toBe(1);
+    expect(afterReturn.body.ledger.map((entry: { eventType: string; pointsDelta: number }) => entry.eventType))
+      .toEqual(['RETURN_REVERSAL', 'SALE_EARN']);
+
+    const customerSummary = await request(app.getHttpServer())
+      .get(`/api/v1/customers/${customer.body.id}/summary`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    expect(customerSummary.body).toMatchObject({
+      grossLifetimeValue: '1000.00',
+      returnedValue: '500.00',
+      lifetimeValue: '500.00',
+      averageBasket: '500.00',
+    });
+  });
+
   it('restocks a returned item and records a RETURN stock movement', async () => {
     const { accessToken } = await registerBusiness(app);
     const { variantId } = await createProductWithVariant(app, accessToken, { sellingPrice: 10 });
@@ -39,6 +94,10 @@ describe('Returns (e2e)', () => {
       .expect(201);
 
     expect(res.body.total).toBe('20.00');
+    await request(app.getHttpServer())
+      .post(`/api/v1/sales/${saleId}/cancel`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(409);
 
     const stockRes = await request(app.getHttpServer())
       .get(`/api/v1/inventory/${variantId}`)

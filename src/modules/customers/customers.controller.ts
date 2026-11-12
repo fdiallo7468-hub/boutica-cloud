@@ -1,3 +1,5 @@
+import { PERMISSIONS } from '../auth/permissions/permission-catalog';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import {
   BadRequestException,
   Body,
@@ -12,9 +14,9 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { and, count, eq } from 'drizzle-orm';
+import { and, count, eq, gte, ilike, lte, or, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
-import { customers } from '../../infrastructure/database/schema';
+import { businessLocations, customers, returns, sales } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { Tenant } from '../auth/tenant.type';
 import { PaginationQueryDto } from '../../common/pagination.dto';
@@ -26,14 +28,22 @@ import { UpdateCustomerDto } from './dto/update-customer.dto';
 export class CustomersController {
   constructor(private readonly db: DatabaseService) {}
 
+  @RequirePermissions(PERMISSIONS.CUSTOMERS_READ)
   @Get()
   async list(
     @CurrentTenant() tenant: Tenant,
     @Query() query: PaginationQueryDto,
     @Query('includeArchived') includeArchived?: string,
+    @Query('search') search?: string,
   ) {
     const filters = [eq(customers.businessId, tenant.businessId)];
     if (includeArchived !== 'true') filters.push(eq(customers.isActive, true));
+    const normalizedSearch = search?.trim();
+    if (normalizedSearch) {
+      const escapedSearch = normalizedSearch.replace(/[\\%_]/g, '\\$&');
+      const pattern = `%${escapedSearch}%`;
+      filters.push(or(ilike(customers.name, pattern), ilike(customers.phone, pattern))!);
+    }
 
     const [data, countResult] = await Promise.all([
       this.db.db.select().from(customers).where(and(...filters)).limit(query.limit).offset(query.offset),
@@ -43,6 +53,154 @@ export class CustomersController {
     return { data, page: query.page, pageSize: query.pageSize, total };
   }
 
+  @RequirePermissions(PERMISSIONS.CUSTOMERS_READ)
+  @Get(':id/history')
+  async history(
+    @CurrentTenant() tenant: Tenant,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('locationId') locationId?: string,
+    @Query('limit') limit = '20',
+    @Query('offset') offset = '0',
+  ) {
+    const [customer] = await this.db.db.select({ id: customers.id }).from(customers).where(and(
+      eq(customers.id, id), eq(customers.businessId, tenant.businessId),
+    ));
+    if (!customer) throw new NotFoundException('Customer not found');
+    const start = from ? new Date(from) : undefined;
+    const end = to ? new Date(to) : undefined;
+    const pageSize = Number(limit);
+    const pageOffset = Number(offset);
+    if ((start && Number.isNaN(start.getTime())) || (end && Number.isNaN(end.getTime())) ||
+      (start && end && start > end) || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100 ||
+      !Number.isInteger(pageOffset) || pageOffset < 0) {
+      throw new BadRequestException('Invalid customer history filters');
+    }
+    const filters = [eq(sales.businessId, tenant.businessId), eq(sales.customerId, id), eq(sales.status, 'COMPLETED')];
+    if (start) filters.push(gte(sales.createdAt, start));
+    if (end) filters.push(lte(sales.createdAt, end));
+    if (locationId) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(locationId)) {
+        throw new BadRequestException('Invalid location ID');
+      }
+      const [location] = await this.db.db.select({ id: businessLocations.id }).from(businessLocations).where(and(
+        eq(businessLocations.id, locationId), eq(businessLocations.businessId, tenant.businessId), eq(businessLocations.isActive, true),
+      ));
+      if (!location) throw new NotFoundException('Location not found');
+      filters.push(eq(sales.locationId, locationId));
+    }
+    const [data, countResult] = await Promise.all([
+      this.db.db.select().from(sales).where(and(...filters)).orderBy(sql`${sales.createdAt} DESC`).limit(pageSize).offset(pageOffset),
+      this.db.db.select({ value: count() }).from(sales).where(and(...filters)),
+    ]);
+    return { customerId: id, data, total: countResult[0]?.value ?? 0, limit: pageSize, offset: pageOffset };
+  }
+
+  @RequirePermissions(PERMISSIONS.CUSTOMERS_READ)
+  @Get(':id/summary')
+  async summary(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) id: string) {
+    const [customer] = await this.db.db
+      .select({ id: customers.id })
+      .from(customers)
+      .where(and(eq(customers.id, id), eq(customers.businessId, tenant.businessId)));
+    if (!customer) throw new NotFoundException('Customer not found');
+
+    const [metrics] = await this.db.db
+      .select({
+        completedSalesCount: count(),
+        grossLifetimeValue: sql<string>`coalesce(sum(${sales.total}), 0)::text`,
+        lastPurchaseAt: sql<Date | null>`max(${sales.createdAt})`,
+      })
+      .from(sales)
+      .where(and(
+        eq(sales.businessId, tenant.businessId),
+        eq(sales.customerId, id),
+        eq(sales.status, 'COMPLETED'),
+      ));
+
+    const [returned] = await this.db.db.select({
+      total: sql<string>`coalesce(sum(${returns.total}), 0)::text`,
+    }).from(returns).innerJoin(sales, eq(returns.saleId, sales.id)).where(and(
+      eq(returns.businessId, tenant.businessId), eq(sales.businessId, tenant.businessId), eq(sales.customerId, id), eq(returns.status, 'COMPLETED'),
+    ));
+    const countValue = metrics?.completedSalesCount ?? 0;
+    const grossValue = Number(metrics?.grossLifetimeValue ?? 0);
+    const returnedValue = Number(returned?.total ?? 0);
+    const netLifetime = grossValue - returnedValue;
+    return {
+      customerId: customer.id,
+      completedSalesCount: countValue,
+      grossLifetimeValue: grossValue.toFixed(2),
+      returnedValue: returnedValue.toFixed(2),
+      lifetimeValue: netLifetime.toFixed(2),
+      averageBasket: (countValue > 0 ? netLifetime / countValue : 0).toFixed(2),
+      lastPurchaseAt: metrics?.lastPurchaseAt ?? null,
+    };
+  }
+
+  @RequirePermissions(PERMISSIONS.CUSTOMERS_READ)
+  @Get('segments')
+  async segments(@CurrentTenant() tenant: Tenant) {
+    const rows = await this.db.db
+      .select({
+        customerId: customers.id,
+        name: customers.name,
+        phone: customers.phone,
+        createdAt: customers.createdAt,
+        completedSalesCount: count(sales.id),
+        lifetimeValue: sql<string>`coalesce(sum(${sales.total}), 0)::text`,
+        lastPurchaseAt: sql<Date | null>`max(${sales.createdAt})`,
+      })
+      .from(customers)
+      .leftJoin(sales, and(
+        eq(sales.customerId, customers.id),
+        eq(sales.businessId, tenant.businessId),
+        eq(sales.status, 'COMPLETED'),
+      ))
+      .where(and(eq(customers.businessId, tenant.businessId), eq(customers.isActive, true)))
+      .groupBy(customers.id);
+
+    const returnedRows = await this.db.db.select({
+      customerId: sales.customerId,
+      returnedValue: sql<string>`coalesce(sum(${returns.total}), 0)::text`,
+    }).from(returns).innerJoin(sales, eq(returns.saleId, sales.id)).where(and(
+      eq(returns.businessId, tenant.businessId), eq(sales.businessId, tenant.businessId), eq(returns.status, 'COMPLETED'), eq(sales.status, 'COMPLETED'),
+    )).groupBy(sales.customerId);
+    const returnedByCustomer = new Map(returnedRows.map(row => [row.customerId, Number(row.returnedValue)]));
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const segments = { new: [] as typeof rows, active: [] as typeof rows, atRisk: [] as typeof rows, inactive: [] as typeof rows, highValue: [] as typeof rows };
+    for (const row of rows) {
+      const adjustedRow = { ...row, lifetimeValue: (Number(row.lifetimeValue) - (returnedByCustomer.get(row.customerId) ?? 0)).toFixed(2) };
+      const lastPurchase = row.lastPurchaseAt ? new Date(row.lastPurchaseAt).getTime() : null;
+      const daysSincePurchase = lastPurchase === null ? null : Math.floor((now - lastPurchase) / day);
+      if (Number(adjustedRow.lifetimeValue) >= 250000) segments.highValue.push(adjustedRow);
+      if (daysSincePurchase === null && now - new Date(row.createdAt).getTime() <= 30 * day) {
+        segments.new.push(adjustedRow);
+      } else if (daysSincePurchase === null || daysSincePurchase > 90) {
+        segments.inactive.push(adjustedRow);
+      } else if (daysSincePurchase > 30) {
+        segments.atRisk.push(adjustedRow);
+      } else {
+        segments.active.push(adjustedRow);
+      }
+    }
+
+    return {
+      rules: { newCustomerDays: 30, activePurchaseDays: 30, atRiskAfterDays: 30, inactiveAfterDays: 90, highValueLifetimeSpend: '250000.00' },
+      counts: {
+        new: segments.new.length,
+        active: segments.active.length,
+        atRisk: segments.atRisk.length,
+        inactive: segments.inactive.length,
+        highValue: segments.highValue.length,
+      },
+      customers: segments,
+    };
+  }
+
+  @RequirePermissions(PERMISSIONS.CUSTOMERS_READ)
   @Get(':id')
   async get(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) id: string) {
     const [customer] = await this.db.db
@@ -53,6 +211,7 @@ export class CustomersController {
     return customer;
   }
 
+  @RequirePermissions(PERMISSIONS.CUSTOMERS_MANAGE)
   @Post()
   async create(@CurrentTenant() tenant: Tenant, @Body() body: CreateCustomerDto) {
     const [customer] = await this.db.db
@@ -62,6 +221,7 @@ export class CustomersController {
     return customer;
   }
 
+  @RequirePermissions(PERMISSIONS.CUSTOMERS_MANAGE)
   @Patch(':id')
   async update(
     @CurrentTenant() tenant: Tenant,
@@ -88,6 +248,7 @@ export class CustomersController {
 
   // Historical sales and receivables keep their customer reference intact.
   // DELETE is therefore a reversible archive, not a physical row deletion.
+  @RequirePermissions(PERMISSIONS.CUSTOMERS_MANAGE)
   @Delete(':id')
   async archive(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) id: string) {
     const [customer] = await this.db.db

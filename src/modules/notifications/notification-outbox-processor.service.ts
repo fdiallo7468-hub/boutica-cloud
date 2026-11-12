@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { and, asc, eq, lte, lt, or } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
+import { TenantTransactionService } from '../../infrastructure/database/tenant-transaction.service';
 import { notificationOutbox } from '../../infrastructure/database/schema';
 import { NotificationDeliveryService } from './notification-delivery.service';
 import { NotificationOutboxEvent } from './notification-events';
@@ -21,6 +22,7 @@ export class NotificationOutboxProcessor implements OnModuleInit, OnModuleDestro
   constructor(
     private readonly database: DatabaseService,
     private readonly delivery: NotificationDeliveryService,
+    private readonly tenantTransactions: TenantTransactionService,
   ) {}
 
   onModuleInit(): void {
@@ -62,25 +64,29 @@ export class NotificationOutboxProcessor implements OnModuleInit, OnModuleDestro
     if (!event) return false;
 
     const heartbeat = setInterval(() => {
-      void this.refreshLock(event.id);
+      void this.refreshLock(event.id, event.businessId);
     }, LOCK_REFRESH_INTERVAL_MS);
     try {
       await this.delivery.deliver(event);
-      await this.database.db
-        .update(notificationOutbox)
-        .set({ status: 'delivered', lockedAt: null, deliveredAt: new Date(), lastError: null })
-        .where(eq(notificationOutbox.id, event.id));
+      await this.tenantTransactions.run({ businessId: event.businessId }, async () => {
+        await this.database.db.execute(sql`
+          SELECT public.boutica_update_notification_outbox(
+            ${event.id}, ${event.businessId}, 'processing', 'delivered',
+            ${event.attempts}, NULL, NULL, ${new Date()}, NULL
+          )
+        `);
+      });
     } catch (error: unknown) {
       const retryAt = new Date(Date.now() + getRetryDelay(event.attempts));
-      await this.database.db
-        .update(notificationOutbox)
-        .set({
-          status: 'pending',
-          availableAt: retryAt,
-          lockedAt: null,
-          lastError: error instanceof Error ? error.name.slice(0, 100) : 'UnknownError',
-        })
-        .where(eq(notificationOutbox.id, event.id));
+      await this.tenantTransactions.run({ businessId: event.businessId }, async () => {
+        await this.database.db.execute(sql`
+          SELECT public.boutica_update_notification_outbox(
+            ${event.id}, ${event.businessId}, 'processing', 'pending',
+            ${event.attempts}, ${retryAt}, NULL, NULL,
+            ${error instanceof Error ? error.name.slice(0, 100) : 'UnknownError'}
+          )
+        `);
+      });
       this.logger.error(
         `Notification ${event.id} (${event.eventType}) failed; retry scheduled for ${retryAt.toISOString()}.`,
         error instanceof Error ? error.stack : String(error),
@@ -91,15 +97,16 @@ export class NotificationOutboxProcessor implements OnModuleInit, OnModuleDestro
     return true;
   }
 
-  private async refreshLock(eventId: string): Promise<void> {
+  private async refreshLock(eventId: string, businessId: string): Promise<void> {
     try {
-      await this.database.db
-        .update(notificationOutbox)
-        .set({ lockedAt: new Date() })
-        .where(and(
-          eq(notificationOutbox.id, eventId),
-          eq(notificationOutbox.status, 'processing'),
-        ));
+      await this.tenantTransactions.run({ businessId }, async () => {
+        await this.database.db.execute(sql`
+          SELECT public.boutica_update_notification_outbox(
+            ${eventId}, ${businessId}, 'processing', 'processing',
+            NULL, NULL, ${new Date()}, NULL, NULL
+          )
+        `);
+      });
     } catch (error: unknown) {
       this.logger.error(
         `Could not refresh the processing lease for notification ${eventId}.`,
@@ -109,35 +116,33 @@ export class NotificationOutboxProcessor implements OnModuleInit, OnModuleDestro
   }
 
   private async claimNext(): Promise<NotificationOutboxEvent | undefined> {
-    return this.database.db.transaction(async (tx) => {
-      const now = new Date();
-      const staleLockTime = new Date(now.getTime() - LOCK_TIMEOUT_MS);
-      const [row] = await tx
+    const now = new Date();
+    const staleLockTime = new Date(now.getTime() - LOCK_TIMEOUT_MS);
+    const claimResult = await this.database.baseDb.execute(sql`
+      SELECT id, business_id
+      FROM public.boutica_claim_notification_outbox(1, 'pending', 'processing', ${staleLockTime})
+    `);
+    const reference = claimResult.rows[0] as { id: string; business_id: string } | undefined;
+    if (!reference) return undefined;
+
+    return this.tenantTransactions.run({ businessId: reference.business_id }, async () => {
+      const [row] = await this.database.db
         .select()
         .from(notificationOutbox)
-        .where(or(
-          and(eq(notificationOutbox.status, 'pending'), lte(notificationOutbox.availableAt, now)),
-          and(eq(notificationOutbox.status, 'processing'), lt(notificationOutbox.lockedAt, staleLockTime)),
+        .where(and(
+          eq(notificationOutbox.id, reference.id),
+          eq(notificationOutbox.businessId, reference.business_id),
         ))
-        .orderBy(asc(notificationOutbox.createdAt))
-        .limit(1)
-        .for('update', { skipLocked: true });
+        .limit(1);
       if (!row) return undefined;
 
-      const [claimed] = await tx
-        .update(notificationOutbox)
-        .set({ status: 'processing', attempts: row.attempts + 1, lockedAt: now })
-        .where(eq(notificationOutbox.id, row.id))
-        .returning();
-      if (!claimed) return undefined;
-
       return {
-        id: claimed.id,
-        businessId: claimed.businessId,
-        eventType: claimed.eventType as NotificationOutboxEvent['eventType'],
-        deduplicationKey: claimed.deduplicationKey,
-        payload: claimed.payload as any,
-        attempts: claimed.attempts,
+        id: row.id,
+        businessId: row.businessId,
+        eventType: row.eventType as NotificationOutboxEvent['eventType'],
+        deduplicationKey: row.deduplicationKey,
+        payload: row.payload as any,
+        attempts: row.attempts,
       };
     });
   }

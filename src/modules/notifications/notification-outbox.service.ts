@@ -113,7 +113,10 @@ export class NotificationOutboxService {
         availableAt: new Date(),
         lastError: null,
       })
-      .where(eq(notificationOutbox.id, eventId))
+      .where(and(
+        eq(notificationOutbox.id, eventId),
+        eq(notificationOutbox.businessId, businessId),
+      ))
       .returning();
 
     return updated;

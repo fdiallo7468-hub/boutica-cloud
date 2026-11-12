@@ -130,6 +130,10 @@ describe("Auth Evolution & Data Model Specification", () => {
         db: {
           select: jest.fn(),
           transaction: jest.fn(),
+          execute: jest.fn().mockResolvedValue({ rows: [] }),
+        },
+        baseDb: {
+          transaction: jest.fn(async (cb: any) => cb(mockDb.db)),
         },
       };
       controller = new OnboardingController(mockDb);
@@ -184,8 +188,9 @@ describe("Auth Evolution & Data Model Specification", () => {
       });
 
       // Mock transaction
-      mockDb.db.transaction.mockImplementation(async (cb: any) => {
+      mockDb.baseDb.transaction.mockImplementation(async (cb: any) => {
         const tx = {
+          execute: jest.fn().mockResolvedValue({ rows: [] }),
           select: jest.fn().mockReturnValue({
             from: jest.fn().mockReturnValue({
               where: jest.fn().mockReturnValue({

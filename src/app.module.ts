@@ -4,11 +4,12 @@ import { ArcjetGuard } from './infrastructure/security/arcjet.guard';
 import { AppController } from "./app.controller";
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from '@thallesp/nestjs-better-auth';
 import { envSchema } from './config/env.schema';
 import { DatabaseModule } from './infrastructure/database/database.module';
+import { TenantDatabaseInterceptor } from './infrastructure/database/tenant-database.interceptor';
 import { DomainExceptionFilter } from './common/errors/domain-exception.filter';
 import { auth } from './auth/auth';
 import { CatalogModule } from './modules/catalog/catalog.module';
@@ -22,10 +23,13 @@ import { CustomersModule } from './modules/customers/customers.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { HealthModule } from './modules/health/health.module';
 import { AuthExtensionModule } from './modules/auth/auth-extension.module';
+import { PermissionGuard } from './modules/auth/permissions/permission.guard';
 import { BusinessModule } from './modules/business/business.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { SyncModule } from './modules/sync/sync.module';
+import { LoyaltyModule } from './modules/loyalty/loyalty.module';
+import { AccountingModule } from './modules/accounting/accounting.module';
 
 @Module({
   imports: [
@@ -65,6 +69,8 @@ import { SyncModule } from './modules/sync/sync.module';
     NotificationsModule,
     FinanceModule,
     SyncModule,
+    LoyaltyModule,
+    AccountingModule,
     StorageModule,
     SecurityModule,
   ],
@@ -72,6 +78,8 @@ import { SyncModule } from './modules/sync/sync.module';
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: ArcjetGuard },
+    { provide: APP_GUARD, useClass: PermissionGuard },
+    { provide: APP_INTERCEPTOR, useClass: TenantDatabaseInterceptor },
     { provide: APP_FILTER, useClass: DomainExceptionFilter },
   ],
 })

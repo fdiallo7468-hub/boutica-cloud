@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
+import { TenantTransactionService } from '../../infrastructure/database/tenant-transaction.service';
 import { businesses, pushDevices, users } from '../../infrastructure/database/schema';
 import {
   getNotificationCategory,
@@ -18,9 +19,16 @@ export class NotificationDeliveryService {
     private readonly database: DatabaseService,
     private readonly novu: NovuNotificationOrchestrator,
     private readonly expo: PushNotificationsService,
+    private readonly tenantTransactions: TenantTransactionService,
   ) {}
 
   async deliver(event: NotificationOutboxEvent): Promise<void> {
+    await this.tenantTransactions.run({ businessId: event.businessId }, () =>
+      this.deliverWithinTenant(event),
+    );
+  }
+
+  private async deliverWithinTenant(event: NotificationOutboxEvent): Promise<void> {
     const category = getNotificationCategory(event.eventType);
     const preference = category === 'sales' ? pushDevices.salesAlerts : pushDevices.stockAlerts;
     const rows = await this.database.db

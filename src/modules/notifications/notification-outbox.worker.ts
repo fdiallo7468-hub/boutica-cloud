@@ -1,12 +1,43 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { and, asc, eq, lte, or } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
+import { TenantTransactionService } from '../../infrastructure/database/tenant-transaction.service';
 import { notificationOutbox } from '../../infrastructure/database/schema';
 import { NovuClientService } from './novu-client.service';
 import { NovuEventType } from './novu.types';
 
 const POLL_INTERVAL_MS = 15_000;
 const LOCK_TIMEOUT_MS = 5 * 60 * 1_000;
+const MAX_BATCH_SIZE = 100;
+
+interface ClaimedOutboxReference {
+  id: string;
+  business_id: string;
+}
+
+interface ClaimedOutboxEvent {
+  id: string;
+  businessId: string;
+  eventType: string;
+  deduplicationKey: string;
+  payload: unknown;
+  attempts: number;
+}
+
+function parseClaimedOutboxReferences(
+  rows: Record<string, unknown>[],
+): ClaimedOutboxReference[] {
+  return rows.map((row, index) => {
+    const { id, business_id: businessId } = row;
+    if (typeof id !== 'string' || typeof businessId !== 'string') {
+      throw new Error(
+        `Invalid notification outbox claim result at row ${index}: expected string id and business_id.`,
+      );
+    }
+
+    return { id, business_id: businessId };
+  });
+}
 
 @Injectable()
 export class NotificationOutboxWorker implements OnModuleInit, OnModuleDestroy {
@@ -18,10 +49,10 @@ export class NotificationOutboxWorker implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly db: DatabaseService,
     private readonly novuClient: NovuClientService,
+    private readonly tenantTransactions: TenantTransactionService,
   ) {}
 
   onModuleInit(): void {
-    // Run once at startup, then continue polling at a fixed interval.
     void this.processPendingEvents().catch((error: unknown) => {
       this.logger.error('Initial notification outbox processing failed.', error);
     });
@@ -40,9 +71,9 @@ export class NotificationOutboxWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Claims records atomically with FOR UPDATE SKIP LOCKED. This is safe across
-   * multiple application instances; the in-memory flag only avoids overlapping
-   * batches inside this process and is not treated as a distributed lock.
+   * The cross-tenant claim is a narrow SECURITY DEFINER function. The worker
+   * receives only row identifiers, then reads and mutates each event inside
+   * a transaction carrying that event's verified business_id.
    */
   async processPendingEvents(
     batchSize = 20,
@@ -56,55 +87,55 @@ export class NotificationOutboxWorker implements OnModuleInit, OnModuleDestroy {
     let failed = 0;
 
     try {
-      const claimedEvents = await this.db.db.transaction(async (tx) => {
-        const now = new Date();
-        const staleLockTime = new Date(now.getTime() - LOCK_TIMEOUT_MS);
-        const events = await tx
-          .select()
-          .from(notificationOutbox)
-          .where(or(
-            and(
-              eq(notificationOutbox.status, 'PENDING'),
-              lte(notificationOutbox.availableAt, now),
-            ),
-            and(
-              eq(notificationOutbox.status, 'PROCESSING'),
-              lte(notificationOutbox.lockedAt, staleLockTime),
-            ),
-          ))
-          .orderBy(asc(notificationOutbox.createdAt))
-          .limit(Math.max(1, Math.min(batchSize, 100)))
-          .for('update', { skipLocked: true });
+      const staleLockTime = new Date(Date.now() - LOCK_TIMEOUT_MS);
+      const claimResult = await this.db.baseDb.execute(sql`
+        SELECT id, business_id
+        FROM public.boutica_claim_notification_outbox(
+          ${Math.max(1, Math.min(batchSize, MAX_BATCH_SIZE))},
+          'PENDING',
+          'PROCESSING',
+          ${staleLockTime}
+        )
+      `);
+      const references = parseClaimedOutboxReferences(claimResult.rows);
+      const claimedEvents: ClaimedOutboxEvent[] = [];
 
-        const claimed: Array<typeof events[number] & { attempts: number }> = [];
-        for (const event of events) {
-          const attempts = event.attempts + 1;
-          await tx
-            .update(notificationOutbox)
-            .set({
-              status: 'PROCESSING',
-              attempts,
-              lockedAt: now,
-            })
-            .where(and(
-              eq(notificationOutbox.id, event.id),
-              or(
-                eq(notificationOutbox.status, 'PENDING'),
+      for (const reference of references) {
+        const event = await this.tenantTransactions.run(
+          { businessId: reference.business_id },
+          async () => {
+            const [row] = await this.db.db
+              .select()
+              .from(notificationOutbox)
+              .where(and(
+                eq(notificationOutbox.id, reference.id),
+                eq(notificationOutbox.businessId, reference.business_id),
                 eq(notificationOutbox.status, 'PROCESSING'),
-              ),
-            ));
-          claimed.push({ ...event, attempts });
-        }
-        return claimed;
-      });
+              ))
+              .limit(1);
+
+            if (!row) return undefined;
+            return {
+              id: row.id,
+              businessId: row.businessId,
+              eventType: row.eventType,
+              deduplicationKey: row.deduplicationKey,
+              payload: row.payload,
+              attempts: row.attempts,
+            };
+          },
+        );
+        if (event) claimedEvents.push(event);
+      }
 
       for (const event of claimedEvents) {
         try {
-          const recipientId = (event.payload as Record<string, unknown>)?.recipientId;
+          const payload = (event.payload as Record<string, unknown>) || {};
+          const recipientId = payload.recipientId;
           const result = await this.novuClient.triggerWorkflow(
             event.eventType as NovuEventType,
             typeof recipientId === 'string' ? recipientId : event.businessId,
-            (event.payload as Record<string, unknown>) || {},
+            payload,
             event.deduplicationKey,
           );
 
@@ -112,18 +143,21 @@ export class NotificationOutboxWorker implements OnModuleInit, OnModuleDestroy {
             throw new Error(result.error || 'Échec de livraison Novu');
           }
 
-          await this.db.db
-            .update(notificationOutbox)
-            .set({
-              status: 'DELIVERED',
-              lockedAt: null,
-              deliveredAt: new Date(),
-              lastError: null,
-            })
-            .where(and(
-              eq(notificationOutbox.id, event.id),
-              eq(notificationOutbox.status, 'PROCESSING'),
-            ));
+          await this.tenantTransactions.run({ businessId: event.businessId }, async () => {
+            await this.db.db
+              .update(notificationOutbox)
+              .set({
+                status: 'DELIVERED',
+                lockedAt: null,
+                deliveredAt: new Date(),
+                lastError: null,
+              })
+              .where(and(
+                eq(notificationOutbox.id, event.id),
+                eq(notificationOutbox.businessId, event.businessId),
+                eq(notificationOutbox.status, 'PROCESSING'),
+              ));
+          });
           succeeded++;
         } catch (error: unknown) {
           const isFinalFailure = event.attempts >= this.maxAttempts;
@@ -131,19 +165,22 @@ export class NotificationOutboxWorker implements OnModuleInit, OnModuleDestroy {
           const nextAttemptAt = new Date(Date.now() + delaySeconds * 1_000);
           const errorMessage = error instanceof Error ? error.message : 'Unknown notification delivery error';
 
-          await this.db.db
-            .update(notificationOutbox)
-            .set({
-              status: isFinalFailure ? 'FAILED' : 'PENDING',
-              attempts: event.attempts,
-              availableAt: nextAttemptAt,
-              lockedAt: null,
-              lastError: errorMessage.slice(0, 1_000),
-            })
-            .where(and(
-              eq(notificationOutbox.id, event.id),
-              eq(notificationOutbox.status, 'PROCESSING'),
-            ));
+          await this.tenantTransactions.run({ businessId: event.businessId }, async () => {
+            await this.db.db
+              .update(notificationOutbox)
+              .set({
+                status: isFinalFailure ? 'FAILED' : 'PENDING',
+                attempts: event.attempts,
+                availableAt: nextAttemptAt,
+                lockedAt: null,
+                lastError: errorMessage.slice(0, 1_000),
+              })
+              .where(and(
+                eq(notificationOutbox.id, event.id),
+                eq(notificationOutbox.businessId, event.businessId),
+                eq(notificationOutbox.status, 'PROCESSING'),
+              ));
+          });
           failed++;
 
           this.logger.warn(

@@ -33,8 +33,8 @@ export async function createTestApp(): Promise<{ app: INestApplication; db: Data
 export async function resetDatabase(db: DatabaseService): Promise<void> {
   await db.db.execute(sql`
     TRUNCATE TABLE
-      idempotency_keys, return_items, returns, sale_items, sales,
-      purchase_items, purchases, stock_movements, stock, variants,
+      loyalty_ledger, loyalty_configurations, idempotency_keys, return_items, returns, sale_items, sales,
+      purchase_items, purchases, stock_movements, inventory_valuations, stock, variants,
       products, customers, suppliers, expenses,
       sessions, accounts, verifications, users, businesses
     RESTART IDENTITY CASCADE
@@ -47,6 +47,7 @@ export interface RegisteredBusiness {
 }
 
 let counter = 0;
+const variantPurchaseCosts = new Map<string, number>();
 
 /**
  * Registers a fresh business + owner user and returns a bearer token.
@@ -115,13 +116,16 @@ export async function createProductWithVariant(
     })
     .expect(201);
 
+  variantPurchaseCosts.set(variant.body.id, opts.purchasePrice ?? opts.sellingPrice ?? 10);
   return { productId: product.body.id, variantId: variant.body.id };
 }
 
 export async function adjustStock(app: INestApplication, token: string, variantId: string, quantity: number): Promise<void> {
+  const unitCost = variantPurchaseCosts.get(variantId);
+  if (unitCost === undefined) throw new Error(`No explicit test purchase cost is registered for variant ${variantId}`);
   await request(app.getHttpServer())
     .post(`/api/v1/inventory/${variantId}/adjust`)
     .set('Authorization', `Bearer ${token}`)
-    .send({ quantity })
+    .send({ quantity, unitCost: unitCost.toFixed(2) })
     .expect(201);
 }
