@@ -96,6 +96,10 @@ Migration `0019_accounting_auxiliary_ledgers.sql` ajoute les références client
 
 Les tests PostgreSQL de 4.4 vérifient la réconciliation de la balance (débit = crédit), les mouvements du grand livre, les auxiliaires clients et fournisseurs, le rejet des références auxiliaires inter-entreprises, l'idempotence des soldes d'ouverture et la possibilité de plusieurs sources d'ouverture sur une même date. Les tests du moteur couvrent également l'idempotence, le rejet d'une réutilisation de clé avec un autre contenu, l'extourne unique et l'immutabilité des écritures comptabilisées.
 
+## Contrat d'intégration opérationnelle
+
+Le détail des événements, des bases de calcul, des prérequis de domaine et des critères d'acceptation est maintenu dans `docs/ACCOUNTING_OPERATIONAL_INTEGRATION_CONTRACT.md`. Ce contrat ne constitue pas une validation comptable ; il définit les contrôles à implémenter avant de fermer 4.3.
+
 ## État de validation
 
 La Phase 4.3 reste incomplète au-delà des dépenses. La Phase 4.4 est la dernière étape de cette Phase 4 ; aucune étape 4.5 ou 4.6 ne doit être ajoutée. Les scénarios d'acceptation PostgreSQL 4.1, 4.2 et 4.4 sont intégrés ; la clôture technique dépend du passage complet de la CI sur le dernier SHA de la PR, de la revue finale et de la décision explicite sur le périmètre opérationnel restant. Aucune conformité SYSCOHADA réglementaire n'est revendiquée sans revue professionnelle.
