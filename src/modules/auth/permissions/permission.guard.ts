@@ -8,23 +8,19 @@ import {
 import { Reflector } from "@nestjs/core";
 import { fromNodeHeaders } from "better-auth/node";
 import type { Request } from "express";
-import { and, eq } from "drizzle-orm";
-import { auth } from "../../../auth/auth";
-import { DatabaseService } from "../../../infrastructure/database/database";
-import { businessMembers, users } from "../../../infrastructure/database/schema";
+import { auth, resolveTenantMembership } from "../../../auth/auth";
 import { hasRolePermission, PermissionCode } from "./permission-catalog";
 import { REQUIRED_PERMISSIONS } from "./require-permissions.decorator";
 
 /**
- * Resolves the active tenant from the persisted user record, then verifies
- * the user's membership in that tenant before evaluating role permissions.
+ * Resolves the tenant selected by the authenticated session, then verifies
+ * the persisted membership in an RLS-scoped transaction before evaluating permissions.
  * Never trusts a businessId or role supplied by the request payload.
  */
 @Injectable()
 export class PermissionGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
-    private readonly database: DatabaseService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -44,33 +40,18 @@ export class PermissionGuard implements CanActivate {
       throw new UnauthorizedException("Session authentifiée requise");
     }
 
-    const [account] = await this.database.db
-      .select({ businessId: users.businessId })
-      .from(users)
-      .where(eq(users.id, session.user.id))
-      .limit(1);
-
-    if (!account?.businessId) {
-      throw new ForbiddenException("Aucune entreprise active pour ce compte");
-    }
-
     const sessionBusinessId = (session.user as typeof session.user & {
       businessId?: string | null;
     }).businessId;
 
-    if (sessionBusinessId !== account.businessId) {
-      throw new ForbiddenException("Le contexte d'entreprise de la session n'est plus valide");
+    if (!sessionBusinessId) {
+      throw new ForbiddenException("Aucune entreprise active pour ce compte");
     }
 
-    const [membership] = await this.database.db
-      .select({ role: businessMembers.role })
-      .from(businessMembers)
-      .where(and(
-        eq(businessMembers.userId, session.user.id),
-        eq(businessMembers.businessId, account.businessId),
-      ))
-      .limit(1);
-
+    // Guards execute before interceptors. Resolve membership in its own
+    // transaction-scoped RLS context instead of querying business_members
+    // through an unscoped runtime connection.
+    const membership = await resolveTenantMembership(session.user.id, sessionBusinessId);
     if (!membership) {
       throw new ForbiddenException("L'appartenance à cette entreprise n'est pas valide");
     }
