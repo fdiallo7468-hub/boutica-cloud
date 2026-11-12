@@ -1,3 +1,5 @@
+import { PERMISSIONS } from '../auth/permissions/permission-catalog';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import { Body, Controller, Get, NotFoundException, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { randomUUID } from 'node:crypto';
@@ -26,6 +28,7 @@ export class ExpensesController {
   // been recorded — the brief is explicit that expenses need to be
   // manageable (section 6), and a write-only ledger isn't. Mirrors the
   // same pagination pattern already used by catalog/customers.
+  @RequirePermissions(PERMISSIONS.FINANCE_READ)
   @Get()
   async list(@CurrentTenant() tenant: Tenant, @Query() query: PaginationQueryDto) {
     const filter = eq(expenses.businessId, tenant.businessId);
@@ -37,6 +40,7 @@ export class ExpensesController {
     return { data, page: query.page, pageSize: query.pageSize, total };
   }
 
+  @RequirePermissions(PERMISSIONS.FINANCE_MANAGE)
   @Post()
   async create(@CurrentTenant() tenant: Tenant, @Body() body: CreateExpenseDto) {
     // ROUND 2 FIX: same currency-consistency fix as catalog.controller.ts —
