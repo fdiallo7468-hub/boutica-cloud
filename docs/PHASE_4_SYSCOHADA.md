@@ -74,13 +74,22 @@ Routes :
 - `GET /api/v1/accounting/entries`
 - `POST /api/v1/accounting/entries/:entryId/reverse`
 
-### 4.3 — intégrations opérationnelles : partiellement implémentée
+### 4.3 — intégrations opérationnelles : incrément implémenté, validation finale ouverte
 
-L'intégration automatisée couvre désormais les dépenses (`EXPENSE`) et les ventes terminées (`SALE`) lorsqu'un mapping explicite est configuré par l'entreprise. La migration `0021_accounting_multi_line_posting_templates.sql` introduit des lignes de mapping ordonnées, des bases de calcul, des répartitions en pourcentage et la conservation de la localisation sur les écritures. Les anciens mappings de dépenses sont convertis en deux lignes.
+L'intégration automatisée déclenche désormais des écritures lorsqu'un mapping explicite appartenant à l'entreprise est configuré pour :
+- les dépenses (`EXPENSE`) ;
+- les ventes terminées (`SALE`) ;
+- les réceptions d'achats (`PURCHASE`) ;
+- les règlements (`PAYMENT`), avec un sélecteur distinct par moyen de paiement et par contexte (`settlement` ou `unallocated`) ;
+- les retours (`RETURN`), avec des bases séparées pour le montant du retour, le coût des articles remis en stock et le coût des articles endommagés.
 
-Pour les ventes, les modèles utilisent exclusivement les données persistées : total, sous-total, remise et instantané du coût unitaire à la vente multiplié par les quantités. Chaque modèle doit produire une écriture équilibrée ; les bases non disponibles, les comptes inactifs, les auxiliaires invalides et les périodes fermées bloquent la transaction source. Aucun numéro de compte ni mapping n'est inventé.
+Les migrations `0021` et `0022` remplacent les mappings binaires par des modèles multi-lignes tenant-scoped, avec ordre, compte, côté débit/crédit, base de calcul, pourcentage et auxiliaire client/fournisseur. Les anciens mappings de dépenses sont convertis en modèles à deux lignes. Les écritures opérationnelles conservent leur localisation.
 
-Les réceptions d'achats, paiements et annulations, retours et mouvements de stock ne déclenchent pas encore d'écritures automatiques. La Phase 4.3 reste donc ouverte. Les traitements fiscaux ne sont pas modélisés et toute revendication de conformité doit être revue par un professionnel SYSCOHADA.
+Les montants sont calculés à partir des enregistrements persistés et des instantanés de coût à la vente. Les modèles sont vérifiés à l'exécution : comptes actifs et imputables, journal autorisé, auxiliaires du bon tenant, période ouverte et équilibre exact débit/crédit. Un événement sans mapping renvoie explicitement `NOT_CONFIGURED` ; aucun compte ni numéro SYSCOHADA n'est inventé. Une configuration existante invalide bloque la transaction métier.
+
+Les annulations de ventes et de paiements créent, dans la même transaction que l'annulation, une écriture inverse de l'écriture d'origine. La création d'une créance avec un montant payé immédiatement enregistre désormais ce règlement comme un vrai paiement, avec moyen de paiement obligatoire, afin de maintenir la cohérence entre la créance, le journal auxiliaire et le grand livre.
+
+**Limites explicites :** la création d'une créance ne génère pas une seconde écriture de chiffre d'affaires, car la vente a déjà reconnu la créance. Les retours peuvent générer une écriture configurée, mais l'application ne réalise pas encore de remboursement monétaire ni de règlement automatique d'un avoir ; le compte de contrepartie doit donc correspondre à la politique documentée de l'entreprise. Les ajustements de stock ne sont pas automatiquement valorisés : FIFO/CUMP et les couches historiques de coûts ne sont pas définis. Les taxes, frais d'approche et remises fournisseurs ne sont pas modélisés. La Phase 4.3 reste ouverte jusqu'à validation des flux restants et des tests PostgreSQL complets.
 
 ### 4.4 — grand livre et balance : premier incrément implémenté
 
