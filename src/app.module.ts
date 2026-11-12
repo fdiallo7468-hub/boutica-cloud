@@ -23,6 +23,7 @@ import { CustomersModule } from './modules/customers/customers.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { HealthModule } from './modules/health/health.module';
 import { AuthExtensionModule } from './modules/auth/auth-extension.module';
+import { PermissionGuard } from './modules/auth/permissions/permission.guard';
 import { BusinessModule } from './modules/business/business.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { FinanceModule } from './modules/finance/finance.module';
@@ -77,6 +78,7 @@ import { AccountingModule } from './modules/accounting/accounting.module';
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: ArcjetGuard },
+    { provide: APP_GUARD, useClass: PermissionGuard },
     { provide: APP_INTERCEPTOR, useClass: TenantDatabaseInterceptor },
     { provide: APP_FILTER, useClass: DomainExceptionFilter },
   ],
