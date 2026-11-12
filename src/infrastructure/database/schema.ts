@@ -964,7 +964,7 @@ export const accountingEventMappings = pgTable(
     debitAccountFk: foreignKey({ name: 'accounting_event_mappings_debit_account_fk', columns: [t.businessId, t.debitAccountId], foreignColumns: [accountingAccounts.businessId, accountingAccounts.id] }),
     creditAccountFk: foreignKey({ name: 'accounting_event_mappings_credit_account_fk', columns: [t.businessId, t.creditAccountId], foreignColumns: [accountingAccounts.businessId, accountingAccounts.id] }),
     distinctAccounts: check('accounting_event_mappings_distinct_accounts_check', sql`${t.debitAccountId} <> ${t.creditAccountId}`),
-    sourceTypeCheck: check('accounting_event_mappings_source_type_check', sql`${t.sourceType} IN ('EXPENSE', 'SALE')`),
+    sourceTypeCheck: check('accounting_event_mappings_source_type_check', sql`${t.sourceType} IN ('EXPENSE', 'SALE', 'PURCHASE', 'PAYMENT', 'RETURN')`),
     categoryCheck: check('accounting_event_mappings_category_check', sql`length(btrim(${t.sourceCategory})) BETWEEN 1 AND 80`),
   }),
 );
@@ -992,7 +992,7 @@ export const accountingEventMappingLines = pgTable(
     accountFk: foreignKey({ name: 'accounting_event_mapping_lines_account_fk', columns: [t.businessId, t.accountId], foreignColumns: [accountingAccounts.businessId, accountingAccounts.id] }),
     lineNumberCheck: check('accounting_event_mapping_lines_number_check', sql`${t.lineNumber} > 0`),
     sideCheck: check('accounting_event_mapping_lines_side_check', sql`${t.side} IN ('DEBIT', 'CREDIT')`),
-    amountBasisCheck: check('accounting_event_mapping_lines_basis_check', sql`${t.amountBasis} IN ('EXPENSE_AMOUNT', 'SALE_TOTAL', 'SALE_SUBTOTAL', 'SALE_DISCOUNT', 'SALE_COST_AT_SALE')`),
+    amountBasisCheck: check('accounting_event_mapping_lines_basis_check', sql`${t.amountBasis} IN ('EXPENSE_AMOUNT', 'SALE_TOTAL', 'SALE_SUBTOTAL', 'SALE_DISCOUNT', 'SALE_COST_AT_SALE', 'PURCHASE_TOTAL', 'PAYMENT_AMOUNT', 'RETURN_TOTAL', 'RETURN_RESTOCK_COST', 'RETURN_DAMAGED_COST')`),
     percentageCheck: check('accounting_event_mapping_lines_percentage_check', sql`${t.percentage} > 0 AND ${t.percentage} <= 100`),
     auxiliaryCheck: check('accounting_event_mapping_lines_auxiliary_check', sql`${t.auxiliaryType} IS NULL OR ${t.auxiliaryType} IN ('CUSTOMER', 'SUPPLIER')`),
   }),
