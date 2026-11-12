@@ -172,6 +172,13 @@ describe('Accounting operational posting (e2e)', () => {
         { accountId: supplierAccount.body.id, side: 'CREDIT', amountBasis: 'PURCHASE_TOTAL', auxiliaryType: 'SUPPLIER' },
       ],
     }).expect(200);
+    await request(app.getHttpServer()).put('/api/v1/accounting/event-mappings/SALE/default').set(auth).send({
+      journalId: salesJournal.body.id,
+      lines: [
+        { accountId: customerAccount.body.id, side: 'DEBIT', amountBasis: 'SALE_TOTAL', auxiliaryType: 'CUSTOMER' },
+        { accountId: revenueAccount.body.id, side: 'CREDIT', amountBasis: 'SALE_TOTAL' },
+      ],
+    }).expect(200);
     await request(app.getHttpServer()).put('/api/v1/accounting/event-mappings/PAYMENT/cash:settlement').set(auth).send({
       journalId: cashJournal.body.id,
       lines: [
@@ -200,7 +207,7 @@ describe('Accounting operational posting (e2e)', () => {
       customerId: customer.body.id,
       items: [{ variantId, quantity: 2 }],
     }).expect(201);
-    expect(sale.body.accounting.status).toBe('NOT_CONFIGURED'); // sale mapping is deliberately not configured in this scenario
+    expect(sale.body.accounting.status).toBe('POSTED');
 
     const payment = await request(app.getHttpServer()).post('/api/v1/payments').set(auth).send({
       customerId: customer.body.id,
