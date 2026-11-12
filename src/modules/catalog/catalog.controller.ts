@@ -1,3 +1,5 @@
+import { PERMISSIONS } from '../auth/permissions/permission-catalog';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import { Body, ConflictException, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { and, count, eq, getTableColumns, ilike, or, sql } from 'drizzle-orm';
@@ -19,6 +21,7 @@ import { VariantQueryDto } from './dto/variant-query.dto';
 export class CatalogController {
   constructor(private readonly db: DatabaseService) {}
 
+  @RequirePermissions(PERMISSIONS.CATALOG_READ)
   @Get()
   async list(@CurrentTenant() tenant: Tenant, @Query() query: ProductQueryDto) {
     const filters = [eq(products.businessId, tenant.businessId)];
@@ -32,6 +35,7 @@ export class CatalogController {
     return { data, page: query.page, pageSize: query.pageSize, total };
   }
 
+  @RequirePermissions(PERMISSIONS.CATALOG_READ)
   @Get(':id')
   async get(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) id: string) {
     const [product] = await this.db.db
@@ -42,6 +46,7 @@ export class CatalogController {
     return product;
   }
 
+  @RequirePermissions(PERMISSIONS.CATALOG_MANAGE)
   @Post()
   async create(@CurrentTenant() tenant: Tenant, @Body() body: CreateProductDto) {
     // Validate through the domain object even though we persist primitives
@@ -56,6 +61,7 @@ export class CatalogController {
     return product;
   }
 
+  @RequirePermissions(PERMISSIONS.CATALOG_MANAGE)
   @Patch(':id')
   async update(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) id: string, @Body() body: UpdateProductDto) {
     if (body.name !== undefined) {
@@ -81,6 +87,7 @@ export class CatalogController {
   // needs to list its own variants — this was previously impossible
   // without already knowing every variantId. Joins stock so a client
   // doesn't need a second round-trip per variant just to show quantity.
+  @RequirePermissions(PERMISSIONS.CATALOG_READ)
   @Get(':id/variants')
   async listVariants(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) productId: string, @Query() query: VariantQueryDto) {
     const [product] = await this.db.db
@@ -109,6 +116,7 @@ export class CatalogController {
     return { data, page: query.page, pageSize: query.pageSize, total };
   }
 
+  @RequirePermissions(PERMISSIONS.CATALOG_MANAGE)
   @Post(':id/variants')
   async addVariant(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) productId: string, @Body() body: AddVariantDto) {
     const [product] = await this.db.db
@@ -167,6 +175,7 @@ export class CatalogController {
   // SKU uniqueness is enforced by the existing `variants_business_sku_unique`
   // constraint (schema.ts); a conflict surfaces as a 409 through the
   // already-global DomainExceptionFilter, no extra handling needed here.
+  @RequirePermissions(PERMISSIONS.CATALOG_MANAGE)
   @Patch(':id/variants/:variantId')
   async updateVariant(
     @CurrentTenant() tenant: Tenant,
@@ -236,6 +245,7 @@ export class CatalogController {
 export class VariantsController {
   constructor(private readonly db: DatabaseService) {}
 
+  @RequirePermissions(PERMISSIONS.CATALOG_READ)
   @Get()
   async list(@CurrentTenant() tenant: Tenant, @Query() query: VariantQueryDto) {
     const filters = [eq(variants.businessId, tenant.businessId)];
