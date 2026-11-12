@@ -99,7 +99,10 @@ describe('CreateSaleUseCase notification events', () => {
       append: jest.fn(),
       appendInTransaction: jest.fn().mockResolvedValue('audit-event-1'),
     };
-    const useCase = new CreateSaleUseCase(database, mockOutboxService, undefined, mockAuditEventsService);
+    const mockAccountingPosting = {
+      postSale: jest.fn().mockResolvedValue({ status: 'NOT_CONFIGURED', entryId: null }),
+    };
+    const useCase = new CreateSaleUseCase(database, mockOutboxService, undefined, mockAuditEventsService, mockAccountingPosting as any);
 
     const result = await useCase.execute(tenant, {
       items: [{ variantId, quantity: 1 }],
