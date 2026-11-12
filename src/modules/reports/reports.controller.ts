@@ -1,3 +1,5 @@
+import { PERMISSIONS } from '../auth/permissions/permission-catalog';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import { BadRequestException, Controller, Get, Header, NotFoundException, Query, Res } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { and, count, desc, eq, gte, lte, ne, sql } from 'drizzle-orm';
@@ -18,6 +20,7 @@ export class ReportsController {
   ) {}
 
   @ApiOperation({ summary: 'Indicateurs agrégés du tableau de bord (Chiffre d\'affaires, bénéfice, top produits)' })
+  @RequirePermissions(PERMISSIONS.REPORTS_READ)
   @Get('dashboard')
   async dashboard(@CurrentTenant() tenant: Tenant, @Query() query: DashboardQueryDto) {
     const now = new Date();
@@ -172,6 +175,7 @@ export class ReportsController {
   }
 
   @ApiOperation({ summary: 'Exporter les ventes de la période au format Excel (.xlsx)' })
+  @RequirePermissions(PERMISSIONS.REPORTS_EXPORT)
   @Get('sales/excel')
   @Header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
   async exportSalesExcel(
@@ -191,6 +195,7 @@ export class ReportsController {
   }
 
   @ApiOperation({ summary: 'Exporter l\'inventaire et les stocks au format Excel (.xlsx)' })
+  @RequirePermissions(PERMISSIONS.REPORTS_EXPORT)
   @Get('inventory/excel')
   @Header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
   async exportInventoryExcel(
@@ -205,6 +210,7 @@ export class ReportsController {
   }
 
   @ApiOperation({ summary: 'Générer et télécharger le rapport des ventes en PDF professionnel' })
+  @RequirePermissions(PERMISSIONS.REPORTS_EXPORT)
   @Get('sales/pdf')
   async exportSalesPdf(
     @CurrentTenant() tenant: Tenant,
@@ -224,6 +230,7 @@ export class ReportsController {
   }
 
   @ApiOperation({ summary: 'Générer et télécharger l\'état des stocks en PDF professionnel' })
+  @RequirePermissions(PERMISSIONS.REPORTS_EXPORT)
   @Get('inventory/pdf')
   async exportInventoryPdf(
     @CurrentTenant() tenant: Tenant,
