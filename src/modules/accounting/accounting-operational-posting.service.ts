@@ -128,6 +128,23 @@ export class AccountingOperationalPostingService {
   }
 
   private async postMappedEvent(tx: any, tenant: Tenant, event: PostingEvent) {
+    // Serialize by tenant/source reference before looking up an existing entry.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${tenant.businessId}), hashtext(${'operational-accounting:' + event.sourceType + ':' + event.sourceId}))`);
+
+    // An already-posted source event is immutable. Replays return its original
+    // accounting result even if the tenant later changes or deactivates its template.
+    const [existing] = await tx.select({
+      id: accountingEntries.id,
+      entryNumber: accountingEntries.entryNumber,
+    }).from(accountingEntries).where(and(
+      eq(accountingEntries.businessId, tenant.businessId),
+      eq(accountingEntries.sourceType, event.sourceType),
+      eq(accountingEntries.sourceId, event.sourceId),
+    )).limit(1);
+    if (existing) {
+      return { status: 'POSTED' as const, entryId: existing.id, entryNumber: existing.entryNumber, replayed: true };
+    }
+
     const [mapping] = await tx.select().from(accountingEventMappings).where(and(
       eq(accountingEventMappings.businessId, tenant.businessId),
       eq(accountingEventMappings.sourceType, event.sourceType),
@@ -141,20 +158,6 @@ export class AccountingOperationalPostingService {
       eq(accountingEventMappingLines.mappingId, mapping.id),
     )).orderBy(asc(accountingEventMappingLines.lineNumber));
     if (lines.length < 2) throw new ConflictException('The configured accounting template must contain at least two lines');
-
-    // An already-posted source event is immutable. Replays return its original
-    // accounting result even if the tenant later changes its template.
-    const [existing] = await tx.select({
-      id: accountingEntries.id,
-      entryNumber: accountingEntries.entryNumber,
-    }).from(accountingEntries).where(and(
-      eq(accountingEntries.businessId, tenant.businessId),
-      eq(accountingEntries.sourceType, event.sourceType),
-      eq(accountingEntries.sourceId, event.sourceId),
-    )).limit(1);
-    if (existing) {
-      return { status: 'POSTED' as const, entryId: existing.id, entryNumber: existing.entryNumber, replayed: true };
-    }
 
     const normalized: Array<{
       accountId: string;
