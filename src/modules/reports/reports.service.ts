@@ -5,6 +5,7 @@ import puppeteer, { type Browser, type Page, type LaunchOptions } from 'puppetee
 import { DatabaseService } from '../../infrastructure/database/database';
 import {
   inventoryBalances,
+  inventoryValuations,
   products,
   saleItems,
   sales,
@@ -114,8 +115,9 @@ export class ReportsService {
 
   async exportInventoryExcel(businessId: string, locationId?: string): Promise<Buffer> {
     const items = locationId ? await this.db.db
-      .select({ productId: products.id, productName: products.name, variantId: variants.id, variantName: variants.name, sku: variants.sku, quantity: inventoryBalances.quantity, cost: variants.purchasePrice, price: variants.sellingPrice })
+      .select({ productId: products.id, productName: products.name, variantId: variants.id, variantName: variants.name, sku: variants.sku, quantity: inventoryBalances.quantity, cost: inventoryValuations.averageUnitCost, price: variants.sellingPrice })
       .from(inventoryBalances).innerJoin(variants, and(eq(inventoryBalances.variantId, variants.id), eq(inventoryBalances.businessId, variants.businessId)))
+      .leftJoin(inventoryValuations, and(eq(inventoryValuations.businessId, inventoryBalances.businessId), eq(inventoryValuations.variantId, inventoryBalances.variantId)))
       .innerJoin(products, eq(variants.productId, products.id))
       .where(and(eq(inventoryBalances.businessId, businessId), eq(inventoryBalances.locationId, locationId)))
       .orderBy(products.name, variants.name) : await this.db.db
@@ -126,11 +128,12 @@ export class ReportsService {
         variantName: variants.name,
         sku: variants.sku,
         quantity: stock.quantity,
-        cost: variants.purchasePrice,
+        cost: inventoryValuations.averageUnitCost,
         price: variants.sellingPrice,
       })
       .from(stock)
-      .innerJoin(variants, eq(stock.variantId, variants.id))
+      .innerJoin(variants, and(eq(stock.variantId, variants.id), eq(stock.businessId, variants.businessId)))
+      .leftJoin(inventoryValuations, and(eq(inventoryValuations.businessId, stock.businessId), eq(inventoryValuations.variantId, stock.variantId)))
       .innerJoin(products, eq(variants.productId, products.id))
       .where(eq(stock.businessId, businessId))
       .orderBy(products.name, variants.name);
@@ -157,25 +160,32 @@ export class ReportsService {
     };
 
     let totalVal = 0;
+    let unvaluedVariants = 0;
     for (const item of items) {
-      const val = Number(item.cost) * item.quantity;
-      totalVal += val;
+      const unitCost = item.cost === null ? null : Number(item.cost);
+      const val = unitCost === null ? null : unitCost * item.quantity;
+      if (val === null) unvaluedVariants += 1;
+      else totalVal += val;
       sheet.addRow({
         product: item.productName,
         variant: item.variantName,
         sku: item.sku,
         quantity: item.quantity,
-        cost: Number(item.cost),
+        cost: unitCost === null ? 'Non valorisé' : unitCost,
         price: Number(item.price),
-        stockValue: val,
+        stockValue: val === null ? 'Non valorisé' : val,
       });
     }
 
     const totalRow = sheet.addRow({
-      product: 'TOTAL VALEUR DU STOCK',
+      product: 'TOTAL VALEUR DU STOCK (CUMP VALORISÉ)',
       stockValue: totalVal,
     });
     totalRow.font = { bold: true };
+    if (unvaluedVariants > 0) {
+      const unvaluedRow = sheet.addRow({ product: 'VARIANTES NON VALORISÉES', stockValue: unvaluedVariants });
+      unvaluedRow.font = { bold: true };
+    }
 
     const arrayBuffer = await workbook.xlsx.writeBuffer();
     return Buffer.from(arrayBuffer);
