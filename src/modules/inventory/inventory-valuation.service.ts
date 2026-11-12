@@ -63,7 +63,7 @@ export class InventoryValuationService {
     const totalValue = unitCostMinor * BigInt(actualQuantity);
     const [created] = await tx.insert(inventoryValuations).values({
       businessId, variantId, quantity: actualQuantity,
-      averageUnitCost: this.fromMinorUnits(unitCostMinor),
+      averageUnitCost: this.fromMinorUnits(actualQuantity === 0 ? 0n : unitCostMinor),
       totalValue: this.fromMinorUnits(totalValue),
     }).returning();
     return created;
