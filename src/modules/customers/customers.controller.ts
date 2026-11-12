@@ -1,3 +1,5 @@
+import { PERMISSIONS } from '../auth/permissions/permission-catalog';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import {
   BadRequestException,
   Body,
@@ -26,6 +28,7 @@ import { UpdateCustomerDto } from './dto/update-customer.dto';
 export class CustomersController {
   constructor(private readonly db: DatabaseService) {}
 
+  @RequirePermissions(PERMISSIONS.CUSTOMERS_READ)
   @Get()
   async list(
     @CurrentTenant() tenant: Tenant,
@@ -50,6 +53,7 @@ export class CustomersController {
     return { data, page: query.page, pageSize: query.pageSize, total };
   }
 
+  @RequirePermissions(PERMISSIONS.CUSTOMERS_READ)
   @Get(':id/history')
   async history(
     @CurrentTenant() tenant: Tenant,
@@ -93,6 +97,7 @@ export class CustomersController {
     return { customerId: id, data, total: countResult[0]?.value ?? 0, limit: pageSize, offset: pageOffset };
   }
 
+  @RequirePermissions(PERMISSIONS.CUSTOMERS_READ)
   @Get(':id/summary')
   async summary(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) id: string) {
     const [customer] = await this.db.db
@@ -134,6 +139,7 @@ export class CustomersController {
     };
   }
 
+  @RequirePermissions(PERMISSIONS.CUSTOMERS_READ)
   @Get('segments')
   async segments(@CurrentTenant() tenant: Tenant) {
     const rows = await this.db.db
@@ -194,6 +200,7 @@ export class CustomersController {
     };
   }
 
+  @RequirePermissions(PERMISSIONS.CUSTOMERS_READ)
   @Get(':id')
   async get(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) id: string) {
     const [customer] = await this.db.db
@@ -204,6 +211,7 @@ export class CustomersController {
     return customer;
   }
 
+  @RequirePermissions(PERMISSIONS.CUSTOMERS_MANAGE)
   @Post()
   async create(@CurrentTenant() tenant: Tenant, @Body() body: CreateCustomerDto) {
     const [customer] = await this.db.db
@@ -213,6 +221,7 @@ export class CustomersController {
     return customer;
   }
 
+  @RequirePermissions(PERMISSIONS.CUSTOMERS_MANAGE)
   @Patch(':id')
   async update(
     @CurrentTenant() tenant: Tenant,
@@ -239,6 +248,7 @@ export class CustomersController {
 
   // Historical sales and receivables keep their customer reference intact.
   // DELETE is therefore a reversible archive, not a physical row deletion.
+  @RequirePermissions(PERMISSIONS.CUSTOMERS_MANAGE)
   @Delete(':id')
   async archive(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) id: string) {
     const [customer] = await this.db.db
