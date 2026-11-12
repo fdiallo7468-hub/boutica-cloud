@@ -94,7 +94,7 @@ describe('Tenant isolation (e2e)', () => {
     await request(app.getHttpServer())
       .post(`/api/v1/inventory/${variantId}/adjust`)
       .set('Authorization', `Bearer ${a.accessToken}`)
-      .send({ quantity: 10 })
+      .send({ quantity: 10, unitCost: '10.00' })
       .expect(201);
 
     const sale = await request(app.getHttpServer())
@@ -202,7 +202,7 @@ describe('Tenant isolation (e2e)', () => {
     await request(app.getHttpServer())
       .post(`/api/v1/inventory/${variantId}/adjust`)
       .set('Authorization', `Bearer ${a.accessToken}`)
-      .send({ quantity: 10 })
+      .send({ quantity: 10, unitCost: '10.00' })
       .expect(201);
     const sale = await request(app.getHttpServer())
       .post('/api/v1/sales')
