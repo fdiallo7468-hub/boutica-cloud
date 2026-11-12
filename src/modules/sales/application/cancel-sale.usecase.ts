@@ -6,6 +6,7 @@ import { inventoryBalances, payments, receivables, returns, saleItems, sales, st
 import { Tenant } from '../../auth/tenant.type';
 import { LoyaltyLedgerService } from '../../loyalty/loyalty-ledger.service';
 import { AccountingOperationalPostingService } from '../../accounting/accounting-operational-posting.service';
+import { InventoryValuationService } from '../../inventory/inventory-valuation.service';
 
 @Injectable()
 export class CancelSaleUseCase {
@@ -14,6 +15,7 @@ export class CancelSaleUseCase {
     private readonly accountingPosting: AccountingOperationalPostingService,
     private readonly loyaltyLedger: LoyaltyLedgerService,
     private readonly auditEvents: AuditEventsService = new AuditEventsService(),
+    private readonly inventoryValuation: InventoryValuationService = new InventoryValuationService(),
   ) {}
 
   async execute(tenant: Tenant, saleId: string) {
@@ -53,6 +55,12 @@ export class CancelSaleUseCase {
 
       const items = await tx.select().from(saleItems).where(eq(saleItems.saleId, saleId));
       for (const item of items) {
+        if (!item.costAtSale) {
+          throw new ConflictException('The original sale has no historical CUMP cost; its stock cannot be restored automatically');
+        }
+        await this.inventoryValuation.restoreReturn(
+          tx, tenant.businessId, item.variantId, item.quantity, item.costAtSale,
+        );
         await tx.update(stock).set({
           quantity: sql`${stock.quantity} + ${item.quantity}`, updatedAt: new Date(),
         }).where(and(eq(stock.businessId, tenant.businessId), eq(stock.variantId, item.variantId)));
