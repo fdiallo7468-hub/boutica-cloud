@@ -1,3 +1,5 @@
+import { PERMISSIONS } from '../auth/permissions/permission-catalog';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import { BadRequestException, Body, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Put } from '@nestjs/common';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
@@ -10,6 +12,7 @@ import { UpdateLoyaltyConfigDto } from './dto/update-loyalty-config.dto';
 export class LoyaltyController {
   constructor(private readonly db: DatabaseService) {}
 
+  @RequirePermissions(PERMISSIONS.CRM_READ)
   @Get('configuration')
   async getConfiguration(@CurrentTenant() tenant: Tenant) {
     const [config] = await this.db.db.select().from(loyaltyConfigurations)
@@ -20,6 +23,7 @@ export class LoyaltyController {
     };
   }
 
+  @RequirePermissions(PERMISSIONS.CRM_MANAGE)
   @Put('configuration')
   async updateConfiguration(
     @CurrentTenant() tenant: Tenant,
@@ -58,6 +62,7 @@ export class LoyaltyController {
     return config;
   }
 
+  @RequirePermissions(PERMISSIONS.CRM_READ)
   @Get('customers/:customerId')
   async customerBalance(@CurrentTenant() tenant: Tenant, @Param('customerId', ParseUUIDPipe) customerId: string) {
     const [customer] = await this.db.db.select({ id: customers.id }).from(customers).where(and(
