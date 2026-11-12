@@ -94,6 +94,18 @@ describe('Novu Integration & Outbox Worker Engine (Part 5)', () => {
       });
     }
 
+    it('rejects malformed claim rows before opening a tenant transaction', async () => {
+      mockDb.baseDb.execute.mockResolvedValueOnce({
+        rows: [{ id: 'outbox-without-business' }],
+      });
+
+      await expect(outboxWorker.processPendingEvents(10)).rejects.toThrow(
+        'Invalid notification outbox claim result at row 0: expected string id and business_id.',
+      );
+      expect(tenantTransactions.run).not.toHaveBeenCalled();
+      expect(novuClientService.triggerWorkflow).not.toHaveBeenCalled();
+    });
+
     it('processes pending outbox records and marks them DELIVERED on success', async () => {
       const pendingRecord = {
         id: 'outbox-1',
