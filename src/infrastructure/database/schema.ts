@@ -988,7 +988,7 @@ export const accountingEventMappingLines = pgTable(
   (t) => ({
     mappingLineUnique: uniqueIndex('accounting_event_mapping_lines_unique').on(t.businessId, t.mappingId, t.lineNumber),
     businessMappingIdx: index('accounting_event_mapping_lines_business_mapping_idx').on(t.businessId, t.mappingId, t.lineNumber),
-    mappingFk: foreignKey({ name: 'accounting_event_mapping_lines_mapping_fk', columns: [t.businessId, t.mappingId], foreignColumns: [accountingEventMappings.businessId, accountingEventMappings.id], onDelete: 'cascade' }),
+    mappingFk: foreignKey({ name: 'accounting_event_mapping_lines_mapping_fk', columns: [t.businessId, t.mappingId], foreignColumns: [accountingEventMappings.businessId, accountingEventMappings.id] }).onDelete('cascade'),
     accountFk: foreignKey({ name: 'accounting_event_mapping_lines_account_fk', columns: [t.businessId, t.accountId], foreignColumns: [accountingAccounts.businessId, accountingAccounts.id] }),
     lineNumberCheck: check('accounting_event_mapping_lines_number_check', sql`${t.lineNumber} > 0`),
     sideCheck: check('accounting_event_mapping_lines_side_check', sql`${t.side} IN ('DEBIT', 'CREDIT')`),
