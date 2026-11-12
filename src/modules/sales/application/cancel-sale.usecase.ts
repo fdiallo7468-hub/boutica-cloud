@@ -5,11 +5,13 @@ import { AuditEventsService } from '../../../infrastructure/database/audit-event
 import { inventoryBalances, payments, receivables, returns, saleItems, sales, stock, stockMovements } from '../../../infrastructure/database/schema';
 import { Tenant } from '../../auth/tenant.type';
 import { LoyaltyLedgerService } from '../../loyalty/loyalty-ledger.service';
+import { AccountingOperationalPostingService } from '../../accounting/accounting-operational-posting.service';
 
 @Injectable()
 export class CancelSaleUseCase {
   constructor(
     private readonly db: DatabaseService,
+    private readonly accountingPosting: AccountingOperationalPostingService,
     private readonly loyaltyLedger: LoyaltyLedgerService,
     private readonly auditEvents: AuditEventsService = new AuditEventsService(),
   ) {}
@@ -72,6 +74,10 @@ export class CancelSaleUseCase {
       )).returning({ id: sales.id, status: sales.status });
       if (!cancelled) throw new ConflictException('Sale status changed during cancellation');
 
+      const accounting = await this.accountingPosting.reverseSourceInTransaction(
+        tx, tenant, 'SALE', saleId,
+      );
+
       await this.loyaltyLedger.reverseForCancellation(tx, {
         businessId: tenant.businessId, saleId, actorUserId: tenant.userId,
       });
@@ -84,7 +90,7 @@ export class CancelSaleUseCase {
         resourceId: saleId,
         metadata: { restoredItemCount: items.length },
       });
-      return { ...cancelled, alreadyCancelled: false };
+      return { ...cancelled, alreadyCancelled: false, accounting };
     });
   }
 }
