@@ -15,6 +15,7 @@ import { NOVU_EVENT_TYPES } from '../../notifications/novu.types';
 import { getStockNotificationTransitions } from '../../notifications/notification-events';
 import { LoyaltyLedgerService } from '../../loyalty/loyalty-ledger.service';
 import { AccountingOperationalPostingService } from '../../accounting/accounting-operational-posting.service';
+import { InventoryValuationService } from '../../inventory/inventory-valuation.service';
 
 const ENDPOINT = 'sales.create';
 
@@ -31,6 +32,7 @@ export class CreateSaleUseCase {
     private readonly accountingPosting: AccountingOperationalPostingService,
     private readonly loyaltyLedger: LoyaltyLedgerService = new LoyaltyLedgerService(),
     private readonly auditEvents: AuditEventsService = new AuditEventsService(),
+    private readonly inventoryValuation: InventoryValuationService = new InventoryValuationService(),
   ) {}
 
   async execute(tenant: Tenant, dto: CreateSaleDto, idempotencyKey: string | undefined): Promise<CreateSaleResult> {
@@ -172,7 +174,7 @@ export class CreateSaleUseCase {
         // cost, so an old sale's reported margin would silently drift if
         // that cost changed later. See reports.controller.ts, which now
         // reads this column instead.
-        const costAtSale = variantById.get(item.variantId)!.purchasePrice;
+        const costAtSale = await this.inventoryValuation.consume(tx, tenant.businessId, item.variantId, item.quantity.value);
 
         const [row] = await tx
           .insert(saleItems)
