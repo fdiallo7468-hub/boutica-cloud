@@ -8,6 +8,7 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
   let mockOutboxService: any;
   let mockAccountingPosting: any;
   let mockLoyaltyLedger: any;
+  let mockInventoryValuation: any;
   let syncService: SyncService;
 
   const mockTenant: Tenant = {
@@ -30,6 +31,7 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
       postExpense: jest.fn().mockResolvedValue({ status: 'NOT_CONFIGURED', entryId: null }),
     };
     mockLoyaltyLedger = { awardForSale: jest.fn().mockResolvedValue(20) };
+    mockInventoryValuation = { consume: jest.fn().mockResolvedValue('2500.00') };
 
     mockDb = {
       db: {
@@ -41,7 +43,7 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
       },
     };
 
-    syncService = new SyncService(mockDb, mockFinanceService, mockOutboxService, mockAccountingPosting, mockLoyaltyLedger);
+    syncService = new SyncService(mockDb, mockFinanceService, mockOutboxService, mockAccountingPosting, mockLoyaltyLedger, mockInventoryValuation);
   });
 
   describe('Device Registration & Sync Status', () => {
@@ -196,6 +198,7 @@ describe('Offline-First Synchronization Engine (Part 7)', () => {
       expect(result.results.length).toBe(3);
       expect(result.results.every((r) => r.status === 'COMMITTED')).toBe(true);
       expect(mockFinanceService.recordPayment).toHaveBeenCalled();
+      expect(mockInventoryValuation.consume).toHaveBeenCalledWith(expect.anything(), mockTenant.businessId, 'var-1', 2);
       expect(mockAccountingPosting.postSale).toHaveBeenCalledWith(expect.anything(), mockTenant, expect.objectContaining({ id: 'sale-offline-1' }), [
         expect.objectContaining({ unitPrice: '5000.00', costAtSale: '2500.00' }),
       ]);
