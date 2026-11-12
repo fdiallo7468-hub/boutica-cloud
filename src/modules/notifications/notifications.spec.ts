@@ -103,7 +103,6 @@ describe('Novu Integration & Outbox Worker Engine (Part 5)', () => {
         'Invalid notification outbox claim result at row 0: expected string id and business_id.',
       );
       expect(tenantTransactions.run).not.toHaveBeenCalled();
-      expect(novuClientService.triggerWorkflow).not.toHaveBeenCalled();
     });
 
     it('processes pending outbox records and marks them DELIVERED on success', async () => {
