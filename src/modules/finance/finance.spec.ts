@@ -30,6 +30,10 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
     mockAuditEventsService = {
       appendInTransaction: jest.fn().mockResolvedValue('audit-event-1'),
     };
+    const mockAccountingPosting = {
+      postPayment: jest.fn().mockResolvedValue({ status: 'NOT_CONFIGURED', entryId: null }),
+      reverseSourceInTransaction: jest.fn().mockResolvedValue({ status: 'NOT_CONFIGURED', reversalEntryId: null }),
+    };
 
     mockDb = {
       db: {
@@ -40,7 +44,7 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
       },
     };
 
-    financeService = new FinanceService(mockDb, mockOutboxService, mockAuditEventsService);
+    financeService = new FinanceService(mockDb, mockAccountingPosting as any, mockOutboxService, mockAuditEventsService);
   });
 
   describe('Settlement Modes (Integral, Partial & Deferred)', () => {
