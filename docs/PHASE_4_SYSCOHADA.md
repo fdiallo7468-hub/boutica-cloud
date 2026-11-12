@@ -74,9 +74,9 @@ Routes :
 - `GET /api/v1/accounting/entries`
 - `POST /api/v1/accounting/entries/:entryId/reverse`
 
-### 4.3 — intégrations opérationnelles : validée
+### 4.3 — intégrations opérationnelles : partiellement implémentée
 
-La Phase 4.3 est considérée comme validée dans le périmètre de travail convenu. Elle est close et ne doit pas être rouverte pendant l'achèvement de la Phase 4, sauf découverte d'une anomalie bloquante explicitement démontrée. Les mappings comptables restent configurables par entreprise : aucune correspondance de comptes ne doit être inventée.
+L'intégration automatisée actuellement présente couvre uniquement les dépenses (`EXPENSE`) lorsqu'un mapping explicite est configuré par l'entreprise. Les ventes, réceptions d'achats, paiements, créances, retours et mouvements de stock ne déclenchent pas encore d'écritures comptables automatiques. La Phase 4.3 ne peut donc pas être déclarée validée. Aucun compte ne doit être déduit ou inventé : chaque flux supplémentaire exige des mappings explicites, des règles métier documentées et des tests PostgreSQL couvrant l'atomicité, l'idempotence et les périodes ouvertes.
 
 ### 4.4 — grand livre et balance : premier incrément implémenté
 
@@ -98,4 +98,4 @@ Les tests PostgreSQL de 4.4 vérifient la réconciliation de la balance (débit 
 
 ## État de validation
 
-La Phase 4.3 est close. La Phase 4.4 est la dernière étape de cette Phase 4 ; aucune étape 4.5 ou 4.6 ne doit être ajoutée. Les scénarios d'acceptation PostgreSQL 4.1, 4.2 et 4.4 sont intégrés ; la clôture technique dépend du passage complet de la CI sur le dernier SHA de la PR et de la revue finale des résultats. Aucune conformité SYSCOHADA réglementaire n'est revendiquée sans revue professionnelle.
+La Phase 4.3 reste incomplète au-delà des dépenses. La Phase 4.4 est la dernière étape de cette Phase 4 ; aucune étape 4.5 ou 4.6 ne doit être ajoutée. Les scénarios d'acceptation PostgreSQL 4.1, 4.2 et 4.4 sont intégrés ; la clôture technique dépend du passage complet de la CI sur le dernier SHA de la PR, de la revue finale et de la décision explicite sur le périmètre opérationnel restant. Aucune conformité SYSCOHADA réglementaire n'est revendiquée sans revue professionnelle.
