@@ -1,3 +1,5 @@
+import { PERMISSIONS } from '../auth/permissions/permission-catalog';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import {
   Body,
   Controller,
@@ -39,6 +41,7 @@ export class BusinessController {
   /**
    * Retourne le profil, les activités, les modules et les membres de l'entreprise active.
    */
+  @RequirePermissions(PERMISSIONS.ORGANIZATION_READ)
   @Get("profile")
   async getProfile(@CurrentTenant() tenant: Tenant) {
     return this.businessService.getBusinessProfile(tenant.businessId);
@@ -47,6 +50,7 @@ export class BusinessController {
   /**
    * Met à jour les informations générales de l'entreprise active.
    */
+  @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
   @Patch("profile")
   async updateProfile(
     @CurrentTenant() tenant: Tenant,
@@ -59,6 +63,7 @@ export class BusinessController {
    * Met à jour les activités commerciales de l'entreprise.
    * Conserve strictement toutes les données historiques (aucun effacement).
    */
+  @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
   @Put("activities")
   @HttpCode(HttpStatus.OK)
   async updateActivities(
@@ -71,6 +76,7 @@ export class BusinessController {
   /**
    * Active ou désactive les modules fonctionnels de l'entreprise (IMEI, Garanties, Unités, etc.).
    */
+  @RequirePermissions(PERMISSIONS.ORGANIZATION_UPDATE)
   @Put("modules")
   @HttpCode(HttpStatus.OK)
   async updateModules(
@@ -83,6 +89,7 @@ export class BusinessController {
   /**
    * Liste les numéros de série et IMEI pour l'entreprise active (optionnellement filtré par variante).
    */
+  @RequirePermissions(PERMISSIONS.INVENTORY_READ)
   @Get("serials")
   async listSerials(
     @CurrentTenant() tenant: Tenant,
@@ -94,6 +101,7 @@ export class BusinessController {
   /**
    * Enregistre un nouveau numéro de série ou IMEI dans l'inventaire.
    */
+  @RequirePermissions(PERMISSIONS.INVENTORY_MANAGE)
   @Post("serials")
   @HttpCode(HttpStatus.CREATED)
   async registerSerial(
