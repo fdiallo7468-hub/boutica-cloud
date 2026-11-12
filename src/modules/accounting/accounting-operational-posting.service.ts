@@ -55,7 +55,7 @@ function percentageToBasisPoints(value: string | number): bigint {
     throw new ConflictException('An accounting template contains an invalid percentage');
   }
   const [whole, fraction = ''] = raw.split('.');
-  const basisPoints = BigInt(whole) * 10_000n + BigInt(fraction.padEnd(4, '0'));
+  const basisPoints = BigInt(whole ?? '0') * 10_000n + BigInt(fraction.padEnd(4, '0'));
   if (basisPoints <= 0n || basisPoints > 1_000_000n) {
     throw new ConflictException('An accounting template percentage must be greater than 0 and at most 100');
   }
