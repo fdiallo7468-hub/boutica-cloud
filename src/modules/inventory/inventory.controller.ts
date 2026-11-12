@@ -1,3 +1,5 @@
+import { PERMISSIONS } from '../auth/permissions/permission-catalog';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import { Controller, Get, NotFoundException, Param, ParseUUIDPipe, Post, Body } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { and, eq } from 'drizzle-orm';
@@ -16,6 +18,7 @@ export class InventoryController {
     private readonly auditEvents: AuditEventsService = new AuditEventsService(),
   ) {}
 
+  @RequirePermissions(PERMISSIONS.INVENTORY_READ)
   @Get(':variantId')
   async get(@CurrentTenant() tenant: Tenant, @Param('variantId', ParseUUIDPipe) variantId: string) {
     // FIX (P0-1): the previous implementation looked up stock by variantId
@@ -32,6 +35,7 @@ export class InventoryController {
     return row ?? { variantId, businessId: tenant.businessId, quantity: 0 };
   }
 
+  @RequirePermissions(PERMISSIONS.INVENTORY_MANAGE)
   @Post(':variantId/adjust')
   async adjust(@CurrentTenant() tenant: Tenant, @Param('variantId', ParseUUIDPipe) variantId: string, @Body() body: AdjustStockDto) {
     return this.db.db.transaction(async (tx) => {
