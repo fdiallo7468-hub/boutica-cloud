@@ -20,6 +20,10 @@ export class SaleItemDto {
 export class CreateSaleDto {
   @IsOptional()
   @IsUUID()
+  locationId?: string;
+
+  @IsOptional()
+  @IsUUID()
   customerId?: string;
 
   @IsOptional()
