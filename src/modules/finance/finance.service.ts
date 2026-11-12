@@ -19,6 +19,7 @@ import {
 } from '../../infrastructure/database/schema';
 import { Tenant } from '../auth/tenant.type';
 import { NotificationOutboxService } from '../notifications/notification-outbox.service';
+import { AccountingOperationalPostingService } from '../accounting/accounting-operational-posting.service';
 import { NOVU_EVENT_TYPES } from '../notifications/novu.types';
 import {
   CancelPaymentDto,
@@ -30,6 +31,7 @@ import {
 export class FinanceService {
   constructor(
     private readonly db: DatabaseService,
+    private readonly accountingPosting: AccountingOperationalPostingService,
     private readonly outboxService: NotificationOutboxService,
     private readonly auditEvents: AuditEventsService = new AuditEventsService(),
   ) {}
@@ -173,6 +175,8 @@ export class FinanceService {
           ));
       }
 
+      const accounting = await this.accountingPosting.postPayment(tx, tenant, payment!);
+
       // 5. Enregistrer les événements d'outbox dans la transaction
       await this.outboxService.enqueue(tx, {
         businessId: tenant.businessId,
@@ -216,6 +220,7 @@ export class FinanceService {
         ...payment,
         customerName: customer.name,
         receivableSettled: isSettled,
+        accounting,
       };
     };
     return transaction ? execute(transaction) : this.db.db.transaction(execute);
@@ -299,6 +304,10 @@ export class FinanceService {
         }
       }
 
+      const accounting = await this.accountingPosting.reverseSourceInTransaction(
+        tx, tenant, 'PAYMENT', paymentId,
+      );
+
       // 3. Journaliser l'annulation
       await tx.insert(paymentCancellations).values({
         businessId: tenant.businessId,
@@ -334,6 +343,7 @@ export class FinanceService {
         success: true,
         message: 'Paiement annulé et créance réajustée avec succès',
         payment: updatedPayment,
+        accounting,
       };
     });
   }
