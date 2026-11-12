@@ -209,15 +209,21 @@ describe('Accounting operational posting (e2e)', () => {
     }).expect(201);
     expect(sale.body.accounting.status).toBe('POSTED');
 
-    const payment = await request(app.getHttpServer()).post('/api/v1/payments').set(auth).send({
+    const receivable = await request(app.getHttpServer()).post('/api/v1/receivables').set(auth).send({
       customerId: customer.body.id,
       saleId: sale.body.id,
-      amount: 50,
+      totalAmount: 200,
+      amountPaidNow: 50,
       paymentMethod: 'CASH',
     }).expect(201);
-    expect(payment.body.accounting).toMatchObject({ status: 'POSTED' });
+    expect(receivable.body).toMatchObject({
+      paidAmount: '50.00',
+      remainingBalance: '150.00',
+      initialPayment: { accounting: { status: 'POSTED' } },
+    });
+    const paymentId = receivable.body.initialPayment.id;
 
-    const cancelledPayment = await request(app.getHttpServer()).post(`/api/v1/payments/${payment.body.id}/cancel`).set(auth)
+    const cancelledPayment = await request(app.getHttpServer()).post(`/api/v1/payments/${paymentId}/cancel`).set(auth)
       .send({ reason: 'Annulation de test' }).expect(200);
     expect(cancelledPayment.body.accounting).toMatchObject({ status: 'REVERSED' });
 
