@@ -26,7 +26,8 @@ type AmountBasis =
   | 'PAYMENT_AMOUNT'
   | 'RETURN_TOTAL'
   | 'RETURN_RESTOCK_COST'
-  | 'RETURN_DAMAGED_COST';
+  | 'RETURN_DAMAGED_COST'
+  | 'STOCK_ADJUSTMENT_VALUE';
 
 type OperationalLine = {
   accountId: string;
@@ -37,7 +38,7 @@ type OperationalLine = {
 };
 
 type PostingEvent = {
-  sourceType: 'EXPENSE' | 'SALE' | 'PURCHASE' | 'PAYMENT' | 'RETURN';
+  sourceType: 'EXPENSE' | 'SALE' | 'PURCHASE' | 'PAYMENT' | 'RETURN' | 'STOCK_ADJUSTMENT';
   sourceCategory: string;
   sourceId: string;
   entryDate: string;
@@ -150,6 +151,26 @@ export class AccountingOperationalPostingService {
       baseAmounts: {
         PURCHASE_TOTAL: accountingAmountToMinorUnits(purchase.total, 'purchase.total'),
       },
+    });
+  }
+
+  async postStockAdjustment(tx: any, tenant: Tenant, movement: {
+    id: string;
+    locationId: string;
+    quantity: number;
+    createdAt: Date;
+  }, value: string) {
+    const amount = accountingAmountToMinorUnits(value, 'stockAdjustment.value');
+    if (amount <= 0n) throw new ConflictException('Stock adjustment value must be positive for accounting');
+    const direction = movement.quantity > 0 ? 'increase' : 'decrease';
+    return this.postMappedEvent(tx, tenant, {
+      sourceType: 'STOCK_ADJUSTMENT',
+      sourceCategory: direction,
+      sourceId: movement.id,
+      entryDate: movement.createdAt.toISOString().slice(0, 10),
+      description: `Ajustement de stock (${direction}) ${movement.id}`,
+      locationId: movement.locationId,
+      baseAmounts: { STOCK_ADJUSTMENT_VALUE: amount },
     });
   }
 
