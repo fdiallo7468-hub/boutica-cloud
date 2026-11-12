@@ -184,6 +184,7 @@ export class CreateSaleUseCase {
             costAtSale,
           })
           .returning();
+        if (!row) throw new ConflictException('A sale item could not be persisted');
         itemRows.push(row);
 
         // ROUND 2 FIX: this used to compute an absolute new value from the
