@@ -76,7 +76,11 @@ Routes :
 
 ### 4.3 — intégrations opérationnelles : partiellement implémentée
 
-L'intégration automatisée actuellement présente couvre uniquement les dépenses (`EXPENSE`) lorsqu'un mapping explicite est configuré par l'entreprise. Les ventes, réceptions d'achats, paiements, créances, retours et mouvements de stock ne déclenchent pas encore d'écritures comptables automatiques. La Phase 4.3 ne peut donc pas être déclarée validée. Aucun compte ne doit être déduit ou inventé : chaque flux supplémentaire exige des mappings explicites, des règles métier documentées et des tests PostgreSQL couvrant l'atomicité, l'idempotence et les périodes ouvertes.
+L'intégration automatisée couvre désormais les dépenses (`EXPENSE`) et les ventes terminées (`SALE`) lorsqu'un mapping explicite est configuré par l'entreprise. La migration `0021_accounting_multi_line_posting_templates.sql` introduit des lignes de mapping ordonnées, des bases de calcul, des répartitions en pourcentage et la conservation de la localisation sur les écritures. Les anciens mappings de dépenses sont convertis en deux lignes.
+
+Pour les ventes, les modèles utilisent exclusivement les données persistées : total, sous-total, remise et instantané du coût unitaire à la vente multiplié par les quantités. Chaque modèle doit produire une écriture équilibrée ; les bases non disponibles, les comptes inactifs, les auxiliaires invalides et les périodes fermées bloquent la transaction source. Aucun numéro de compte ni mapping n'est inventé.
+
+Les réceptions d'achats, paiements et annulations, retours et mouvements de stock ne déclenchent pas encore d'écritures automatiques. La Phase 4.3 reste donc ouverte. Les traitements fiscaux ne sont pas modélisés et toute revendication de conformité doit être revue par un professionnel SYSCOHADA.
 
 ### 4.4 — grand livre et balance : premier incrément implémenté
 
