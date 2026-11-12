@@ -199,6 +199,19 @@ describe('envSchema Validation & Security', () => {
       expect(result.success).toBe(true);
     });
 
+    it('devrait rejeter les identifiants PostgreSQL de remplacement du fichier .env.example en production', () => {
+      const example = {
+        ...validProductionEnv,
+        DATABASE_URL: 'postgresql://boutica_app:change_me@localhost:5432/boutica',
+      };
+      const result = envSchema.safeParse(example);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const dbIssue = result.error.issues.find((i) => i.path.includes('DATABASE_URL'));
+        expect(dbIssue?.message).toContain('known development/demo fallback');
+      }
+    });
+
     it('devrait rejeter la chaîne PostgreSQL de démonstration connue en production', () => {
       const demo = {
         ...validProductionEnv,
