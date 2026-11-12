@@ -7,12 +7,14 @@ export const KNOWN_DEV_SECRETS = [
   'dev_secret_key_1234567890_at_least_32_chars',
   '12345678901234567890123456789012',
   'abcdefghijklmnopqrstuvwxyz123456',
+  'generate_at_least_32_characters_random_secret_here',
 ];
 
 const KNOWN_DEV_DB_URLS = [
   'postgresql://user:password@localhost:5432/boutica',
   'postgresql://localhost:5432/boutica',
   'postgres://localhost:5432/boutica',
+  'postgresql://boutica_app:change_me@localhost:5432/boutica',
 ];
 
 /**
