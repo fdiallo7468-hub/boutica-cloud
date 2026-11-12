@@ -92,6 +92,8 @@ export class InventoryController {
       const previousQuantity = current?.quantity ?? 0;
       const delta = body.quantity - previousQuantity;
       let adjustmentValue: string | null = null;
+      let accountingStatus = 'NOT_REQUIRED';
+      let accountingEntryId: string | null = null;
       if (delta > 0) {
         if (body.unitCost === undefined) {
           throw new BadRequestException('unitCost is required for a positive stock adjustment under CUMP');
@@ -129,6 +131,8 @@ export class InventoryController {
         }).returning();
         if (!movement || adjustmentValue === null) throw new ConflictException('Could not persist the valued stock adjustment');
         const accounting = await this.accountingPosting.postStockAdjustment(tx, tenant, movement, adjustmentValue);
+        accountingStatus = accounting.status;
+        accountingEntryId = accounting.entryId;
         await this.auditEvents.appendInTransaction(tx, {
           businessId: tenant.businessId,
           actorUserId: tenant.userId,
@@ -140,7 +144,7 @@ export class InventoryController {
         });
       }
 
-      return updated;
+      return { ...updated, accounting: { status: accountingStatus, entryId: accountingEntryId } };
     });
   }
 }
