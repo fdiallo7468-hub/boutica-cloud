@@ -24,6 +24,21 @@ interface ClaimedOutboxEvent {
   attempts: number;
 }
 
+function parseClaimedOutboxReferences(
+  rows: Record<string, unknown>[],
+): ClaimedOutboxReference[] {
+  return rows.map((row, index) => {
+    const { id, business_id: businessId } = row;
+    if (typeof id !== 'string' || typeof businessId !== 'string') {
+      throw new Error(
+        `Invalid notification outbox claim result at row ${index}: expected string id and business_id.`,
+      );
+    }
+
+    return { id, business_id: businessId };
+  });
+}
+
 @Injectable()
 export class NotificationOutboxWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(NotificationOutboxWorker.name);
@@ -82,7 +97,7 @@ export class NotificationOutboxWorker implements OnModuleInit, OnModuleDestroy {
           ${staleLockTime}
         )
       `);
-      const references = claimResult.rows as ClaimedOutboxReference[];
+      const references = parseClaimedOutboxReferences(claimResult.rows);
       const claimedEvents: ClaimedOutboxEvent[] = [];
 
       for (const reference of references) {
