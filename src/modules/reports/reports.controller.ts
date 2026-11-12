@@ -5,7 +5,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { and, count, desc, eq, gte, lte, ne, sql } from 'drizzle-orm';
 import type { Response } from 'express';
 import { DatabaseService } from '../../infrastructure/database/database';
-import { businessLocations, expenses, inventoryBalances, products, receivables, saleItems, sales, stock, variants } from '../../infrastructure/database/schema';
+import { businessLocations, expenses, inventoryBalances, inventoryValuations, products, receivables, saleItems, sales, stock, variants } from '../../infrastructure/database/schema';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { Tenant } from '../auth/tenant.type';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
@@ -50,11 +50,22 @@ export class ReportsController {
       ...(query.locationId ? [eq(sales.locationId, query.locationId)] : []),
     );
     const stockValueQuery = query.locationId
-      ? this.db.db.select({ stockValue: sql<string>`coalesce(sum(${inventoryBalances.quantity} * ${variants.purchasePrice}), 0)::text` })
-          .from(inventoryBalances).innerJoin(variants, eq(inventoryBalances.variantId, variants.id))
+      ? this.db.db.select({
+          stockValue: sql<string>`coalesce(sum(${inventoryBalances.quantity} * ${inventoryValuations.averageUnitCost}), 0)::text`,
+          unvaluedStockQuantity: sql<number>`coalesce(sum(case when ${inventoryValuations.variantId} is null then ${inventoryBalances.quantity} else 0 end), 0)::int`,
+        })
+          .from(inventoryBalances)
+          .innerJoin(variants, and(eq(inventoryBalances.variantId, variants.id), eq(inventoryBalances.businessId, variants.businessId)))
+          .leftJoin(inventoryValuations, and(eq(inventoryValuations.businessId, inventoryBalances.businessId), eq(inventoryValuations.variantId, inventoryBalances.variantId)))
           .where(and(eq(inventoryBalances.businessId, businessId), eq(inventoryBalances.locationId, query.locationId)))
-      : this.db.db.select({ stockValue: sql<string>`coalesce(sum(${stock.quantity} * ${variants.purchasePrice}), 0)::text` })
-          .from(stock).innerJoin(variants, eq(stock.variantId, variants.id)).where(eq(stock.businessId, businessId));
+      : this.db.db.select({
+          stockValue: sql<string>`coalesce(sum(${stock.quantity} * ${inventoryValuations.averageUnitCost}), 0)::text`,
+          unvaluedStockQuantity: sql<number>`coalesce(sum(case when ${inventoryValuations.variantId} is null then ${stock.quantity} else 0 end), 0)::int`,
+        })
+          .from(stock)
+          .innerJoin(variants, and(eq(stock.variantId, variants.id), eq(stock.businessId, variants.businessId)))
+          .leftJoin(inventoryValuations, and(eq(inventoryValuations.businessId, stock.businessId), eq(inventoryValuations.variantId, stock.variantId)))
+          .where(eq(stock.businessId, businessId));
     const lowStockQuery = query.locationId
       ? this.db.db.select({ variantId: inventoryBalances.variantId, quantity: inventoryBalances.quantity, variantName: variants.name, sku: variants.sku })
           .from(inventoryBalances).innerJoin(variants, eq(inventoryBalances.variantId, variants.id))
@@ -97,7 +108,8 @@ export class ReportsController {
         .where(and(eq(expenses.businessId, businessId), gte(expenses.createdAt, from), lte(expenses.createdAt, to), ...(query.locationId ? [eq(expenses.locationId, query.locationId)] : []))),
       this.db.db
         .select({
-          grossMargin: sql<string>`coalesce(sum((${saleItems.unitPrice} - coalesce(${saleItems.costAtSale}, ${variants.purchasePrice})) * ${saleItems.quantity}), 0)`,
+          grossMargin: sql<string>`coalesce(sum((${saleItems.unitPrice} - coalesce(${saleItems.costAtSale}, 0)) * ${saleItems.quantity}), 0)`,
+          unvaluedSaleItems: sql<number>`count(*) filter (where ${saleItems.costAtSale} is null)::int`,
         })
         .from(saleItems)
         .innerJoin(sales, eq(saleItems.saleId, sales.id))
@@ -148,6 +160,8 @@ export class ReportsController {
     const expensesTotal = expensesRows[0]?.expensesTotal ?? '0.00';
     const grossMargin = (Number(grossMarginRows[0]?.grossMargin ?? 0) - Number(discountRows[0]?.discountTotal ?? 0)).toFixed(2);
     const stockValue = stockValueRows[0]?.stockValue ?? '0.00';
+    const unvaluedStockQuantity = stockValueRows[0]?.unvaluedStockQuantity ?? 0;
+    const unvaluedSaleItems = grossMarginRows[0]?.unvaluedSaleItems ?? 0;
     const receivablesSummary = receivablesRows[0] ?? { totalOutstanding: '0.00', overdueAmount: '0.00', count: 0 };
 
     return {
@@ -162,6 +176,8 @@ export class ReportsController {
       estimatedProfit: ((toMinorUnits(grossMargin) - toMinorUnits(expensesTotal)) / 100).toFixed(2),
       estimatedProfitIsEstimate: true,
       stockValue,
+      unvaluedStockQuantity,
+      unvaluedSaleItems,
       receivables: {
         totalOutstanding: receivablesSummary.totalOutstanding,
         overdueAmount: receivablesSummary.overdueAmount,
