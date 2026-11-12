@@ -347,7 +347,7 @@ export class AccountingOperationalPostingService {
       eq(accountingEventMappings.sourceType, event.sourceType),
       eq(accountingEventMappings.sourceCategory, event.sourceCategory),
       eq(accountingEventMappings.isActive, true),
-    )).limit(1);
+    )).for('update').limit(1);
     if (!mapping) return { status: 'NOT_CONFIGURED' as const, entryId: null };
 
     const lines = await tx.select().from(accountingEventMappingLines).where(and(
