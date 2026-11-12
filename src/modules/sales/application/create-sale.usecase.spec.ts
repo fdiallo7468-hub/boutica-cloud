@@ -102,13 +102,15 @@ describe('CreateSaleUseCase notification events', () => {
     const mockAccountingPosting = {
       postSale: jest.fn().mockResolvedValue({ status: 'NOT_CONFIGURED', entryId: null }),
     };
-    const useCase = new CreateSaleUseCase(database, mockOutboxService, mockAccountingPosting as any, undefined, mockAuditEventsService);
+    const mockInventoryValuation = { consume: jest.fn().mockResolvedValue('800.00') };
+    const useCase = new CreateSaleUseCase(database, mockOutboxService, mockAccountingPosting as any, undefined, mockAuditEventsService, mockInventoryValuation as any);
 
     const result = await useCase.execute(tenant, {
       items: [{ variantId, quantity: 1 }],
     }, undefined);
 
     expect(result.replayed).toBe(false);
+    expect(mockInventoryValuation.consume).toHaveBeenCalledWith(tx, businessId, variantId, 1);
     expect(mockAuditEventsService.appendInTransaction).toHaveBeenCalledWith(
       tx,
       expect.objectContaining({ action: 'sale.created', resourceType: 'sale' }),
