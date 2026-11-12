@@ -18,7 +18,9 @@ describe('CreateSaleUseCase notification events', () => {
     const variantId = 'bb6b6d02-a34a-42e5-9bc5-b12feabf6f08';
     const tenant = { userId: 'owner-user-id', businessId, role: 'OWNER' as const };
     const businessWhere = jest.fn().mockResolvedValue([{ currency: 'XOF' }]);
-    const locationWhere = jest.fn().mockResolvedValue([{ id: 'location-main' }]);
+    const locationWhere = jest.fn().mockReturnValue({
+      limit: jest.fn().mockResolvedValue([{ id: 'location-main' }]),
+    });
     const variantWhere = jest.fn().mockResolvedValue([{
       id: variantId,
       businessId,
