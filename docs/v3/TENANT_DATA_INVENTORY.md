@@ -48,6 +48,7 @@ The initial inventory above predates the v3 schema additions. The following rela
 |---|---|---|
 | `business_locations` | `business_id` | Child of the business root; location IDs are never authorization grants. |
 | `inventory_balances` | `business_id` | Also constrained by composite business/location and business/variant FKs. |
+| `inventory_valuations` | `business_id` | CUMP valuation pool keyed by business + variant; RLS and restrictive same-tenant variant policy are applied by migration `0023_inventory_cump_valuation.sql`. |
 | `loyalty_configurations` | `business_id` | One configuration per business. |
 | `loyalty_ledger` | `business_id` | Append-only; composite customer FK. |
 | `audit_events` | `business_id` | Append-only; read access must be restricted and tenant-scoped. |
