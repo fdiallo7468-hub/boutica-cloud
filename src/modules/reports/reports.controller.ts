@@ -108,7 +108,7 @@ export class ReportsController {
         .where(and(eq(expenses.businessId, businessId), gte(expenses.createdAt, from), lte(expenses.createdAt, to), ...(query.locationId ? [eq(expenses.locationId, query.locationId)] : []))),
       this.db.db
         .select({
-          grossMargin: sql<string>`coalesce(sum((${saleItems.unitPrice} - coalesce(${saleItems.costAtSale}, 0)) * ${saleItems.quantity}), 0)`,
+          grossMargin: sql<string>`coalesce(sum(case when ${saleItems.costAtSale} is null then 0 else (${saleItems.unitPrice} - ${saleItems.costAtSale}) * ${saleItems.quantity} end), 0)`,
           unvaluedSaleItems: sql<number>`count(*) filter (where ${saleItems.costAtSale} is null)::int`,
         })
         .from(saleItems)
