@@ -1,3 +1,5 @@
+import { PERMISSIONS } from '../auth/permissions/permission-catalog';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { Tenant } from '../auth/tenant.type';
@@ -7,6 +9,7 @@ import { AccountingLedgerService } from './accounting-ledger.service';
 export class AccountingLedgerController {
   constructor(private readonly ledger: AccountingLedgerService) {}
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_POST)
   @Post('entries')
   createEntry(
     @CurrentTenant() tenant: Tenant,
@@ -19,6 +22,7 @@ export class AccountingLedgerController {
     return this.ledger.createAndPost(tenant, body, tenant.userId);
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_READ)
   @Get('entries')
   listEntries(
     @CurrentTenant() tenant: Tenant,
@@ -30,6 +34,7 @@ export class AccountingLedgerController {
     return this.ledger.list(tenant, { from, to, periodId, limit: limit ? Number(limit) : undefined });
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_POST)
   @Post('entries/:entryId/reverse')
   reverse(
     @CurrentTenant() tenant: Tenant,
@@ -39,21 +44,25 @@ export class AccountingLedgerController {
     return this.ledger.reverse(tenant, entryId, body.periodId, body.entryDate, tenant.userId);
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_POST)
   @Post('opening-balances')
   openingBalance(@CurrentTenant() tenant: Tenant, @Body() body: any) {
     return this.ledger.openingBalance(tenant, body, tenant.userId);
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_READ)
   @Get('customers/:customerId/ledger')
   customerLedger(@CurrentTenant() tenant: Tenant, @Param('customerId') id: string, @Query('from') from?: string, @Query('to') to?: string) {
     return this.ledger.auxiliaryLedger(tenant, 'CUSTOMER', id, from, to);
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_READ)
   @Get('suppliers/:supplierId/ledger')
   supplierLedger(@CurrentTenant() tenant: Tenant, @Param('supplierId') id: string, @Query('from') from?: string, @Query('to') to?: string) {
     return this.ledger.auxiliaryLedger(tenant, 'SUPPLIER', id, from, to);
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_READ)
   @Get('accounts/:accountId/ledger')
   accountLedger(
     @CurrentTenant() tenant: Tenant,
@@ -64,6 +73,7 @@ export class AccountingLedgerController {
     return this.ledger.ledger(tenant, accountId, from, to);
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_READ)
   @Get('trial-balance')
   trialBalance(
     @CurrentTenant() tenant: Tenant,
