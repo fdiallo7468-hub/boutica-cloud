@@ -94,16 +94,39 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
         }),
       });
 
+      const recordPayment = jest.spyOn(financeService, 'recordPayment').mockResolvedValue({
+        id: 'payment-initial-1',
+        amount: '40000.00',
+        paymentMethod: PaymentMethodEnum.CASH,
+      } as any);
+      mockDb.db.select.mockReturnValueOnce({
+        from: () => ({
+          where: () => ({ limit: () => Promise.resolve([{
+            id: 'rec-1',
+            businessId: mockTenant.businessId,
+            customerId: mockCustomer.id,
+            saleId: 'sale-1',
+            initialAmount: '100000.00',
+            paidAmount: '40000.00',
+            remainingBalance: '60000.00',
+            status: 'PARTIALLY_PAID',
+          }]) }),
+        }),
+      });
+
       const rec = await financeService.createReceivableForSale(mockTenant, {
         saleId: 'sale-1',
         customerId: mockCustomer.id,
         totalAmount: 100000,
         amountPaidNow: 40000,
+        paymentMethod: PaymentMethodEnum.CASH,
         dueDate: '2026-12-01T00:00:00.000Z',
       });
 
       expect(rec.remainingBalance).toBe('60000.00');
       expect(rec.status).toBe('PARTIALLY_PAID');
+      expect(rec.initialPayment).toMatchObject({ id: 'payment-initial-1' });
+      expect(recordPayment).toHaveBeenCalledWith(mockTenant, expect.objectContaining({ amount: 40000, paymentMethod: PaymentMethodEnum.CASH }), expect.anything());
       expect(mockOutboxService.enqueue).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ eventType: 'receivable.created' }),
