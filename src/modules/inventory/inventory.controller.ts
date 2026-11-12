@@ -1,6 +1,6 @@
 import { PERMISSIONS } from '../auth/permissions/permission-catalog';
 import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
-import { Controller, Get, NotFoundException, Param, ParseUUIDPipe, Post, Body } from '@nestjs/common';
+import { BadRequestException, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Post, Body } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { and, eq } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
@@ -9,6 +9,8 @@ import { businessLocations, inventoryBalances, stock, stockMovements, variants }
 import { CurrentTenant } from '../auth/current-tenant.decorator';
 import { Tenant } from '../auth/tenant.type';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
+import { InitializeOpeningValuationDto } from './dto/initialize-opening-valuation.dto';
+import { InventoryValuationService } from './inventory-valuation.service';
 
 @ApiTags('inventory')
 @Controller('api/v1/inventory')
@@ -16,6 +18,7 @@ export class InventoryController {
   constructor(
     private readonly db: DatabaseService,
     private readonly auditEvents: AuditEventsService = new AuditEventsService(),
+    private readonly valuationService: InventoryValuationService = new InventoryValuationService(),
   ) {}
 
   @RequirePermissions(PERMISSIONS.INVENTORY_READ)
@@ -33,6 +36,33 @@ export class InventoryController {
 
     const [row] = await this.db.db.select().from(stock).where(eq(stock.variantId, variantId));
     return row ?? { variantId, businessId: tenant.businessId, quantity: 0 };
+  }
+
+  @RequirePermissions(PERMISSIONS.INVENTORY_MANAGE)
+  @Post(':variantId/valuation/opening')
+  async initializeOpeningValuation(
+    @CurrentTenant() tenant: Tenant,
+    @Param('variantId', ParseUUIDPipe) variantId: string,
+    @Body() body: InitializeOpeningValuationDto,
+  ) {
+    return this.db.db.transaction(async (tx) => {
+      const [variant] = await tx.select({ id: variants.id }).from(variants).where(and(
+        eq(variants.id, variantId), eq(variants.businessId, tenant.businessId),
+      ));
+      if (!variant) throw new NotFoundException('Variant not found');
+      const valuation = await this.valuationService.initializeOpening(
+        tx, tenant.businessId, variantId, body.quantity, body.unitCost,
+      );
+      await this.auditEvents.appendInTransaction(tx, {
+        businessId: tenant.businessId,
+        actorUserId: tenant.userId,
+        action: 'inventory.cump_opening_initialized',
+        resourceType: 'variant',
+        resourceId: variantId,
+        metadata: { quantity: body.quantity, unitCost: body.unitCost, totalValue: valuation.totalValue },
+      });
+      return valuation;
+    });
   }
 
   @RequirePermissions(PERMISSIONS.INVENTORY_MANAGE)
@@ -59,6 +89,14 @@ export class InventoryController {
         .for('update');
       const previousQuantity = current?.quantity ?? 0;
       const delta = body.quantity - previousQuantity;
+      if (delta > 0) {
+        if (body.unitCost === undefined) {
+          throw new BadRequestException('unitCost is required for a positive stock adjustment under CUMP');
+        }
+        await this.valuationService.receive(tx, tenant.businessId, variantId, delta, body.unitCost);
+      } else if (delta < 0) {
+        await this.valuationService.adjustDown(tx, tenant.businessId, variantId, Math.abs(delta));
+      }
 
       const [updated] = await tx
         .insert(stock)
