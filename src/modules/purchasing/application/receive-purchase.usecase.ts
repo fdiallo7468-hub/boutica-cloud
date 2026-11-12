@@ -51,10 +51,12 @@ export class ReceivePurchaseUseCase {
       const currency = business?.currency ?? 'XOF';
       const [location] = await tx.select({ id: businessLocations.id }).from(businessLocations).where(and(
         eq(businessLocations.businessId, tenant.businessId),
-        eq(businessLocations.isDefault, true),
+        dto.locationId ? eq(businessLocations.id, dto.locationId) : eq(businessLocations.isDefault, true),
         eq(businessLocations.isActive, true),
-      ));
-      if (!location) throw new BadRequestException('No active default business location is configured');
+      )).limit(1);
+      if (!location) throw new BadRequestException(dto.locationId
+        ? 'Selected location does not exist, is inactive, or does not belong to this business'
+        : 'No active default business location is configured');
 
       // FIX (v2.1, client-integration audit §11): supplierId was
       // previously accepted with no ownership check at all — a caller
