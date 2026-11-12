@@ -472,7 +472,7 @@ export class AccountingController {
 
   @RequirePermissions(PERMISSIONS.ACCOUNTING_MANAGE)
   @Put('event-mappings/:sourceType/:category')
-  async configureSaleMapping(
+  async configureOperationalMapping(
     @CurrentTenant() tenant: Tenant,
     @Param('sourceType') sourceTypeParam: string,
     @Param('category') categoryParam: string,
@@ -480,19 +480,41 @@ export class AccountingController {
   ) {
     await this.requireProfile(tenant.businessId);
     const sourceType = requiredText(sourceTypeParam, 'sourceType', 20).toUpperCase();
-    if (sourceType !== 'SALE') {
-      throw new BadRequestException('This multi-line configuration endpoint currently supports SALE events only');
+    const category = requiredText(decodeURIComponent(categoryParam), 'category', 80).toLowerCase();
+    const journalTypes: Record<string, string[]> = {
+      SALE: ['SALES', 'GENERAL'],
+      PURCHASE: ['PURCHASE', 'GENERAL'],
+      PAYMENT: ['CASH', 'BANK', 'GENERAL'],
+      RETURN: ['SALES', 'GENERAL'],
+    };
+    const amountBases: Record<string, Set<string>> = {
+      SALE: new Set(['SALE_TOTAL', 'SALE_SUBTOTAL', 'SALE_DISCOUNT', 'SALE_COST_AT_SALE']),
+      PURCHASE: new Set(['PURCHASE_TOTAL']),
+      PAYMENT: new Set(['PAYMENT_AMOUNT']),
+      RETURN: new Set(['RETURN_TOTAL', 'RETURN_RESTOCK_COST', 'RETURN_DAMAGED_COST']),
+    };
+    const auxiliaryTypes: Record<string, string | null> = {
+      SALE: 'CUSTOMER',
+      PURCHASE: 'SUPPLIER',
+      PAYMENT: 'CUSTOMER',
+      RETURN: 'CUSTOMER',
+    };
+    if (!journalTypes[sourceType]) {
+      throw new BadRequestException('Supported operational mapping types are SALE, PURCHASE, PAYMENT and RETURN');
     }
-    const sourceCategory = requiredText(decodeURIComponent(categoryParam), 'category', 80).toLowerCase();
-    if (sourceCategory !== 'default') {
-      throw new BadRequestException('SALE mappings currently use the fixed category "default"');
+    if (sourceType === 'SALE' || sourceType === 'PURCHASE' || sourceType === 'RETURN') {
+      if (category !== 'default') {
+        throw new BadRequestException(`${sourceType} mappings currently use the fixed category "default"`);
+      }
     }
+    if (sourceType === 'PAYMENT' && !/^(cash|orange_money|moov_money|bank_transfer|card|wave|other):(settlement|unallocated)$/.test(category)) {
+      throw new BadRequestException('PAYMENT category must be <payment_method>:<settlement|unallocated>');
+    }
+
     const journalId = requiredText(body.journalId, 'journalId', 36);
     if (!Array.isArray(body.lines) || body.lines.length < 2 || body.lines.length > 200) {
       throw new BadRequestException('A posting template must contain between 2 and 200 lines');
     }
-
-    const allowedBases = new Set(['SALE_TOTAL', 'SALE_SUBTOTAL', 'SALE_DISCOUNT', 'SALE_COST_AT_SALE']);
     const normalizedLines = body.lines.map((raw, index) => {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         throw new BadRequestException(`lines[${index}] must be an object`);
@@ -502,8 +524,8 @@ export class AccountingController {
       if (line.side !== 'DEBIT' && line.side !== 'CREDIT') {
         throw new BadRequestException(`lines[${index}].side must be DEBIT or CREDIT`);
       }
-      if (typeof line.amountBasis !== 'string' || !allowedBases.has(line.amountBasis)) {
-        throw new BadRequestException(`lines[${index}].amountBasis is not supported for SALE`);
+      if (typeof line.amountBasis !== 'string' || !amountBases[sourceType].has(line.amountBasis)) {
+        throw new BadRequestException(`lines[${index}].amountBasis is not supported for ${sourceType}`);
       }
       const percentage = line.percentage === undefined ? '100.0000' : String(line.percentage);
       if (!/^\d{1,3}(?:\.\d{1,4})?$/.test(percentage) || Number(percentage) <= 0 || Number(percentage) > 100) {
@@ -512,10 +534,16 @@ export class AccountingController {
       const auxiliaryType = line.auxiliaryType === undefined || line.auxiliaryType === null
         ? null
         : line.auxiliaryType;
-      if (auxiliaryType !== null && auxiliaryType !== 'CUSTOMER') {
-        throw new BadRequestException(`lines[${index}].auxiliaryType must be CUSTOMER for SALE`);
+      if (auxiliaryType !== null && auxiliaryType !== auxiliaryTypes[sourceType]) {
+        throw new BadRequestException(`lines[${index}].auxiliaryType is not supported for ${sourceType}`);
       }
-      return { accountId, side: line.side as 'DEBIT' | 'CREDIT', amountBasis: line.amountBasis, percentage, auxiliaryType };
+      return {
+        accountId,
+        side: line.side as 'DEBIT' | 'CREDIT',
+        amountBasis: line.amountBasis,
+        percentage,
+        auxiliaryType,
+      };
     });
     if (!normalizedLines.some((line) => line.side === 'DEBIT') || !normalizedLines.some((line) => line.side === 'CREDIT')) {
       throw new BadRequestException('A posting template must contain at least one debit and one credit line');
@@ -524,8 +552,8 @@ export class AccountingController {
     const [journal] = await this.database.db.select().from(accountingJournals).where(and(
       eq(accountingJournals.id, journalId), eq(accountingJournals.businessId, tenant.businessId),
     )).limit(1);
-    if (!journal || !journal.isActive || !['SALES', 'GENERAL'].includes(journal.journalType)) {
-      throw new BadRequestException('An active SALES or GENERAL journal belonging to this business is required');
+    if (!journal || !journal.isActive || !journalTypes[sourceType].includes(journal.journalType)) {
+      throw new BadRequestException(`An active ${journalTypes[sourceType].join(' or ')} journal belonging to this business is required`);
     }
     const accountIds = [...new Set(normalizedLines.map((line) => line.accountId))];
     const accounts = await this.database.db.select().from(accountingAccounts).where(and(
@@ -539,8 +567,8 @@ export class AccountingController {
     return this.database.db.transaction(async (tx) => {
       const [mapping] = await tx.insert(accountingEventMappings).values({
         businessId: tenant.businessId,
-        sourceType: 'SALE',
-        sourceCategory,
+        sourceType,
+        sourceCategory: category,
         journalId,
         debitAccountId: null,
         creditAccountId: null,
@@ -550,7 +578,7 @@ export class AccountingController {
         target: [accountingEventMappings.businessId, accountingEventMappings.sourceType, accountingEventMappings.sourceCategory],
         set: { journalId, debitAccountId: null, creditAccountId: null, isActive: true, updatedAt: new Date() },
       }).returning();
-      if (!mapping) throw new ConflictException('Could not save the sale accounting template');
+      if (!mapping) throw new ConflictException('Could not save the operational accounting template');
       await tx.delete(accountingEventMappingLines).where(and(
         eq(accountingEventMappingLines.businessId, tenant.businessId),
         eq(accountingEventMappingLines.mappingId, mapping.id),
