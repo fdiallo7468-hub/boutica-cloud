@@ -8,7 +8,7 @@ export class AdjustStockDto {
   // Required for positive stock adjustments; never inferred from catalog purchasePrice.
   @IsOptional()
   @IsString()
-  @Matches(/^\\d+(?:\\.\\d{1,2})?$/)
+  @Matches(/^\d+(?:\.\d{1,2})?$/)
   unitCost?: string;
 
   @IsOptional()
