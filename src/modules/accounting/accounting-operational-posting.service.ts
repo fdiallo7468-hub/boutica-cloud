@@ -37,7 +37,7 @@ type OperationalLine = {
 };
 
 type PostingEvent = {
-  sourceType: 'EXPENSE' | 'SALE';
+  sourceType: 'EXPENSE' | 'SALE' | 'PURCHASE' | 'PAYMENT' | 'RETURN';
   sourceCategory: string;
   sourceId: string;
   entryDate: string;
@@ -188,10 +188,12 @@ export class AccountingOperationalPostingService {
   }, items: Array<{ quantity: number; condition: 'RESTOCK' | 'DAMAGED'; costAtSale: string | null }>) {
     let restockCost = 0n;
     let damagedCost = 0n;
-    let costSnapshotMissing = false;
+    let restockCostSnapshotMissing = false;
+    let damagedCostSnapshotMissing = false;
     for (const item of items) {
       if (item.costAtSale === null) {
-        costSnapshotMissing = true;
+        if (item.condition === 'RESTOCK') restockCostSnapshotMissing = true;
+        else damagedCostSnapshotMissing = true;
         continue;
       }
       const amount = accountingAmountToMinorUnits(item.costAtSale, 'returnItem.costAtSale') * BigInt(item.quantity);
@@ -212,7 +214,10 @@ export class AccountingOperationalPostingService {
         RETURN_RESTOCK_COST: restockCost,
         RETURN_DAMAGED_COST: damagedCost,
       },
-      unavailableBases: costSnapshotMissing ? ['RETURN_RESTOCK_COST', 'RETURN_DAMAGED_COST'] : [],
+      unavailableBases: [
+        ...(restockCostSnapshotMissing ? ['RETURN_RESTOCK_COST' as const] : []),
+        ...(damagedCostSnapshotMissing ? ['RETURN_DAMAGED_COST' as const] : []),
+      ],
     });
   }
 
