@@ -9,6 +9,7 @@ import { hashRequestPayload } from '../../../common/idempotency/idempotency.util
 import { Tenant } from '../../auth/tenant.type';
 import { Purchase, PurchaseItem } from '../domain/purchase';
 import { ReceivePurchaseDto } from '../dto/receive-purchase.dto';
+import { AccountingOperationalPostingService } from '../../accounting/accounting-operational-posting.service';
 
 const ENDPOINT = 'purchases.receive';
 
@@ -21,6 +22,7 @@ export interface ReceivePurchaseResult {
 export class ReceivePurchaseUseCase {
   constructor(
     private readonly db: DatabaseService,
+    private readonly accountingPosting: AccountingOperationalPostingService,
     private readonly auditEvents: AuditEventsService = new AuditEventsService(),
   ) {}
 
@@ -138,7 +140,8 @@ export class ReceivePurchaseUseCase {
         });
       }
 
-      const responseBody = { ...purchaseRow, items: itemRows };
+      const accounting = await this.accountingPosting.postPurchase(tx, tenant, purchaseRow!);
+      const responseBody = { ...purchaseRow, items: itemRows, accounting };
 
       if (idempotencyKey) {
         await tx.insert(idempotencyKeys).values({
