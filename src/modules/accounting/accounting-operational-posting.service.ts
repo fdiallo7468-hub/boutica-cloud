@@ -162,7 +162,8 @@ export class AccountingOperationalPostingService {
     createdAt: Date;
   }, value: string) {
     const amount = accountingAmountToMinorUnits(value, 'stockAdjustment.value');
-    if (amount <= 0n) throw new ConflictException('Stock adjustment value must be positive for accounting');
+    if (amount === 0n) return { status: 'ZERO_VALUE' as const, entryId: null };
+    if (amount < 0n) throw new ConflictException('Stock adjustment value cannot be negative');
     const direction = movement.quantity > 0 ? 'increase' : 'decrease';
     return this.postMappedEvent(tx, tenant, {
       sourceType: 'STOCK_ADJUSTMENT',
