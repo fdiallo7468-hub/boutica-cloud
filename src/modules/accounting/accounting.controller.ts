@@ -1,3 +1,5 @@
+import { PERMISSIONS } from '../auth/permissions/permission-catalog';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import {
   BadRequestException,
   Body,
@@ -47,6 +49,7 @@ function validDate(value: unknown, field: string): string {
 export class AccountingController {
   constructor(private readonly database: DatabaseService) {}
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_READ)
   @Get('profile')
   async getProfile(@CurrentTenant() tenant: Tenant) {
     const [profile] = await this.database.db.select().from(accountingProfiles)
@@ -54,6 +57,7 @@ export class AccountingController {
     return profile ?? null;
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_MANAGE)
   @Put('profile')
   async configureProfile(
     @CurrentTenant() tenant: Tenant,
@@ -89,6 +93,7 @@ export class AccountingController {
     return profile;
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_READ)
   @Get('accounts')
   async listAccounts(@CurrentTenant() tenant: Tenant) {
     return this.database.db.select().from(accountingAccounts)
@@ -96,6 +101,7 @@ export class AccountingController {
       .orderBy(asc(accountingAccounts.accountNumber));
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_MANAGE)
   @Post('accounts')
   async createAccount(
     @CurrentTenant() tenant: Tenant,
@@ -155,6 +161,7 @@ export class AccountingController {
     }
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_MANAGE)
   @Patch('accounts/:accountId')
   async updateAccount(
     @CurrentTenant() tenant: Tenant,
@@ -193,6 +200,7 @@ export class AccountingController {
     return updated;
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_READ)
   @Get('fiscal-years')
   async listFiscalYears(@CurrentTenant() tenant: Tenant) {
     return this.database.db.select().from(accountingFiscalYears)
@@ -200,6 +208,7 @@ export class AccountingController {
       .orderBy(asc(accountingFiscalYears.startDate));
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_MANAGE)
   @Post('fiscal-years')
   async createFiscalYear(
     @CurrentTenant() tenant: Tenant,
@@ -236,6 +245,7 @@ export class AccountingController {
     }
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_READ)
   @Get('periods')
   async listPeriods(@CurrentTenant() tenant: Tenant) {
     return this.database.db.select().from(accountingPeriods)
@@ -243,6 +253,7 @@ export class AccountingController {
       .orderBy(asc(accountingPeriods.startDate), asc(accountingPeriods.code));
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_MANAGE)
   @Post('periods')
   async createPeriod(
     @CurrentTenant() tenant: Tenant,
@@ -288,6 +299,7 @@ export class AccountingController {
     }
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_MANAGE)
   @Patch('periods/:periodId/status')
   async updatePeriodStatus(
     @CurrentTenant() tenant: Tenant,
@@ -316,6 +328,7 @@ export class AccountingController {
     });
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_READ)
   @Get('journals')
   async listJournals(@CurrentTenant() tenant: Tenant) {
     return this.database.db.select().from(accountingJournals)
@@ -323,6 +336,7 @@ export class AccountingController {
       .orderBy(asc(accountingJournals.code));
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_MANAGE)
   @Post('journals')
   async createJournal(
     @CurrentTenant() tenant: Tenant,
@@ -361,6 +375,7 @@ export class AccountingController {
     }
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_MANAGE)
   @Patch('journals/:journalId')
   async updateJournal(
     @CurrentTenant() tenant: Tenant,
@@ -385,6 +400,7 @@ export class AccountingController {
   }
 
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_READ)
   @Get('event-mappings')
   async listEventMappings(@CurrentTenant() tenant: Tenant) {
     return this.database.db.select().from(accountingEventMappings)
@@ -392,6 +408,7 @@ export class AccountingController {
       .orderBy(asc(accountingEventMappings.sourceType), asc(accountingEventMappings.sourceCategory));
   }
 
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_MANAGE)
   @Put('event-mappings/expenses/:category')
   async configureExpenseMapping(
     @CurrentTenant() tenant: Tenant,
