@@ -22,13 +22,13 @@
 - Production/default branch: `br-lucky-union-b5cqpuuo` (`production`)
 - Production migration ledger: entries 1–11.
 - v3 migrations 0012–0019 are not applied to production.
-- Current point-in-time branch copy: `pre-v3-production-2026-11-11` (`br-red-rain-b5ddfjir`), created from production at 2026-11-11T12:35:48Z, no compute enabled.
+- Historical current-environment point-in-time branch copy: `pre-v3-production-2026-11-11` (`br-red-rain-b5ddfjir`), created from production at 2026-11-11T12:35:48Z, no compute enabled.
 - Historical restore drill: `restore-rehearsal-2026-11-11` (`br-solitary-recipe-b53v6awr`), restored from the existing 2026-10-23 snapshot. This is not a current recovery point.
 
 ## 2. Runtime and migration connection separation
 
 - `DATABASE_URL`: API runtime connection. Use the least-privileged `boutica_runtime` role and the pooled Neon endpoint where appropriate.
-- `DATABASE_URL_UNPOOLED`: direct Neon connection for Drizzle migration tooling only. The repository's `drizzle.config.ts` prefers this variable and rejects a hostname containing `-pooler`.
+- `DATABASE_MIGRATION_URL`: direct PostgreSQL connection for Drizzle migration tooling only, provisioned by the buyer on the selected PostgreSQL provider. The legacy `DATABASE_URL_UNPOOLED` remains a compatibility alias; neither variable belongs in the API runtime environment.
 - Never put the database owner/migration credential in the API runtime environment. Use a secure one-time migration runner/operator environment. Do not commit connection strings or credentials.
 - Do not use `drizzle-kit push` in production. Use the reviewed, ordered migration journal with `npm run db:migrate`.
 
