@@ -21,6 +21,7 @@ import { Return, SaleItemReturnableInfo } from '../domain/return';
 import { CreateReturnDto } from '../dto/create-return.dto';
 import { LoyaltyLedgerService } from '../../loyalty/loyalty-ledger.service';
 import { AccountingOperationalPostingService } from '../../accounting/accounting-operational-posting.service';
+import { InventoryValuationService } from '../../inventory/inventory-valuation.service';
 
 const ENDPOINT = 'returns.create';
 
@@ -36,6 +37,7 @@ export class CreateReturnUseCase {
     private readonly accountingPosting: AccountingOperationalPostingService,
     private readonly loyaltyLedger: LoyaltyLedgerService = new LoyaltyLedgerService(),
     private readonly auditEvents: AuditEventsService = new AuditEventsService(),
+    private readonly inventoryValuation: InventoryValuationService = new InventoryValuationService(),
   ) {}
 
   async execute(tenant: Tenant, dto: CreateReturnDto, idempotencyKey: string | undefined): Promise<CreateReturnResult> {
@@ -128,6 +130,7 @@ export class CreateReturnUseCase {
         .returning();
 
       const itemRows = [];
+      const saleItemById = new Map(lockedSaleItems.map((item) => [item.id, item]));
       for (const item of returnEntity.items) {
         const [row] = await tx
           .insert(returnItems)
@@ -143,6 +146,13 @@ export class CreateReturnUseCase {
         itemRows.push(row);
 
         if (item.condition === 'RESTOCK') {
+          const originalSaleItem = saleItemById.get(item.saleItemId);
+          if (!originalSaleItem?.costAtSale) {
+            throw new ConflictException('The original sale has no historical CUMP cost; this item cannot be restocked automatically');
+          }
+          await this.inventoryValuation.restoreReturn(
+            tx, tenant.businessId, item.variantId, item.quantity.value, originalSaleItem.costAtSale,
+          );
           await tx
             .insert(stock)
             .values({ variantId: item.variantId, businessId: tenant.businessId, quantity: item.quantity.value })
@@ -180,7 +190,6 @@ export class CreateReturnUseCase {
         actorUserId: tenant.userId,
       });
 
-      const saleItemById = new Map(lockedSaleItems.map((item) => [item.id, item]));
       const accounting = await this.accountingPosting.postReturn(tx, tenant, {
         ...returnRow!,
         locationId: sale.locationId,
