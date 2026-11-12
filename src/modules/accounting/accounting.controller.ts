@@ -540,9 +540,9 @@ export class AccountingController {
       return {
         accountId,
         side: line.side as 'DEBIT' | 'CREDIT',
-        amountBasis: line.amountBasis,
+        amountBasis: line.amountBasis as string,
         percentage,
-        auxiliaryType,
+        auxiliaryType: auxiliaryType as 'CUSTOMER' | 'SUPPLIER' | null,
       };
     });
     if (!normalizedLines.some((line) => line.side === 'DEBIT') || !normalizedLines.some((line) => line.side === 'CREDIT')) {
