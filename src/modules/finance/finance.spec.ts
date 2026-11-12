@@ -158,6 +158,20 @@ describe('Finance Module — Payments, Receivables & Settlement Modes (Part 6)',
           from: () => ({
             where: () => ({ limit: () => Promise.resolve([]) }),
           }),
+        })
+        .mockReturnValueOnce({
+          from: () => ({
+            where: () => ({ limit: () => Promise.resolve([{
+              id: 'rec-deferred',
+              businessId: mockTenant.businessId,
+              customerId: mockCustomer.id,
+              saleId: 'sale-2',
+              initialAmount: '100000.00',
+              paidAmount: '0.00',
+              remainingBalance: '100000.00',
+              status: 'PENDING',
+            }]) }),
+          }),
         });
 
       mockDb.db.insert.mockReturnValueOnce({
