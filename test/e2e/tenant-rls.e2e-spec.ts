@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { createProductWithVariant, createTestApp, registerBusiness, resetDatabase, adjustStock } from '../utils/test-app';
 import { DatabaseService } from '../../src/infrastructure/database/database';
-import { businessMembers, businesses, products, saleItems, users } from '../../src/infrastructure/database/schema';
+import { businessMembers, businesses, inventoryValuations, products, saleItems, users } from '../../src/infrastructure/database/schema';
 
 async function expectRlsViolation(operation: Promise<unknown>): Promise<void> {
   let rejection: unknown;
@@ -157,6 +157,50 @@ describe('PostgreSQL tenant RLS (e2e)', () => {
         businessId: b.businessId,
         userId: owner!.id,
         role: 'OWNER',
+      });
+    }));
+  });
+
+  it('enforces tenant RLS and variant ownership on CUMP valuation rows', async () => {
+    const a = await registerBusiness(app, 'RLS Valuation A');
+    const b = await registerBusiness(app, 'RLS Valuation B');
+    const aProduct = await createProductWithVariant(app, a.accessToken);
+    const bProduct = await createProductWithVariant(app, b.accessToken);
+
+    const inserted = await db.baseDb.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE boutica_runtime`);
+      await tx.execute(sql`SELECT set_config('app.business_id', ${a.businessId}, true)`);
+      return tx.insert(inventoryValuations).values({
+        businessId: a.businessId,
+        variantId: aProduct.variantId,
+        quantity: 0,
+        averageUnitCost: '0.00',
+        totalValue: '0.00',
+      }).returning({ variantId: inventoryValuations.variantId });
+    });
+    expect(inserted).toHaveLength(1);
+
+    await expectRlsViolation(db.baseDb.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE boutica_runtime`);
+      await tx.execute(sql`SELECT set_config('app.business_id', ${a.businessId}, true)`);
+      await tx.insert(inventoryValuations).values({
+        businessId: b.businessId,
+        variantId: bProduct.variantId,
+        quantity: 0,
+        averageUnitCost: '0.00',
+        totalValue: '0.00',
+      });
+    }));
+
+    await expectRlsViolation(db.baseDb.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE boutica_runtime`);
+      await tx.execute(sql`SELECT set_config('app.business_id', ${a.businessId}, true)`);
+      await tx.insert(inventoryValuations).values({
+        businessId: a.businessId,
+        variantId: bProduct.variantId,
+        quantity: 0,
+        averageUnitCost: '0.00',
+        totalValue: '0.00',
       });
     }));
   });
