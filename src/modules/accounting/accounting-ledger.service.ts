@@ -267,6 +267,7 @@ export class AccountingLedgerService {
         businessId: tenant.businessId,
         journalId: original.journalId,
         periodId: period.id,
+        locationId: original.locationId,
         entryNumber: `${journal.sequencePrefix}${String(sequence.allocated).padStart(6, '0')}`,
         entryDate,
         description: `Extourne: ${original.description}`.slice(0, 240),
