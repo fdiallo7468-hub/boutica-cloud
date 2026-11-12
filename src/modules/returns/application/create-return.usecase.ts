@@ -185,6 +185,7 @@ export class CreateReturnUseCase {
         ...returnRow!,
         locationId: sale.locationId,
         customerId: sale.customerId,
+        saleDiscount: sale.discount,
       }, returnEntity.items.map((item) => ({
         quantity: item.quantity.value,
         condition: item.condition,
