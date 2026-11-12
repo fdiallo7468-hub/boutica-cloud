@@ -117,7 +117,6 @@ export class InventoryValuationService {
       throw new ConflictException('Requested quantity exceeds the valued inventory balance');
     }
     const average = this.toMinorUnits(valuation.averageUnitCost, 'average unit cost');
-    const cost = average * BigInt(quantity);
     const nextQuantity = valuation.quantity - quantity;
     const nextValue = average * BigInt(nextQuantity);
     await tx.update(inventoryValuations).set({
