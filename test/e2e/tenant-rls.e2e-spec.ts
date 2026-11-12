@@ -6,6 +6,29 @@ import { createProductWithVariant, createTestApp, registerBusiness, resetDatabas
 import { DatabaseService } from '../../src/infrastructure/database/database';
 import { businessMembers, businesses, products, saleItems, users } from '../../src/infrastructure/database/schema';
 
+async function expectRlsViolation(operation: Promise<unknown>): Promise<void> {
+  let rejection: unknown;
+  try {
+    await operation;
+  } catch (error) {
+    rejection = error;
+  }
+
+  expect(rejection).toBeDefined();
+
+  const messages: string[] = [];
+  const visited = new Set<object>();
+  let current: unknown = rejection;
+  while (current && typeof current === 'object' && !visited.has(current)) {
+    visited.add(current);
+    const error = current as { message?: unknown; cause?: unknown };
+    if (typeof error.message === 'string') messages.push(error.message);
+    current = error.cause;
+  }
+
+  expect(messages.join('\\n')).toMatch(/row-level security|policy/i);
+}
+
 describe('PostgreSQL tenant RLS (e2e)', () => {
   let app: INestApplication;
   let db: DatabaseService;
@@ -49,14 +72,14 @@ describe('PostgreSQL tenant RLS (e2e)', () => {
     const b = await registerBusiness(app, 'RLS Write B');
     const bProduct = await createProductWithVariant(app, b.accessToken);
 
-    await expect(db.baseDb.transaction(async (tx) => {
+    await expectRlsViolation(db.baseDb.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE boutica_runtime`);
       await tx.execute(sql`SELECT set_config('app.business_id', ${a.businessId}, true)`);
       await tx.insert(products).values({
         businessId: b.businessId,
         name: 'Forged cross-tenant product',
       });
-    })).rejects.toThrow(/row-level security|policy/i);
+    }));
 
     const updated = await db.baseDb.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE boutica_runtime`);
@@ -123,7 +146,7 @@ describe('PostgreSQL tenant RLS (e2e)', () => {
     }
     expect(created.id).toBe(newBusinessId);
 
-    await expect(db.baseDb.transaction(async (tx) => {
+    await expectRlsViolation(db.baseDb.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE boutica_runtime`);
       await tx.execute(sql`
         SELECT
@@ -135,7 +158,7 @@ describe('PostgreSQL tenant RLS (e2e)', () => {
         userId: owner!.id,
         role: 'OWNER',
       });
-    })).rejects.toThrow(/row-level security|policy/i);
+    }));
   });
 
   it('rejects a child row that links a tenant A sale to a tenant B variant', async () => {
@@ -151,7 +174,7 @@ describe('PostgreSQL tenant RLS (e2e)', () => {
       .send({ items: [{ variantId: aProduct.variantId, quantity: 1 }] })
       .expect(201);
 
-    await expect(db.baseDb.transaction(async (tx) => {
+    await expectRlsViolation(db.baseDb.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE boutica_runtime`);
       await tx.execute(sql`SELECT set_config('app.business_id', ${a.businessId}, true)`);
       await tx.insert(saleItems).values({
@@ -161,6 +184,6 @@ describe('PostgreSQL tenant RLS (e2e)', () => {
         unitPrice: '10',
         costAtSale: '5',
       });
-    })).rejects.toThrow(/row-level security|policy/i);
+    }));
   });
 });
