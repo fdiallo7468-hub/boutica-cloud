@@ -24,6 +24,7 @@ import { PaymentMethodEnum } from '../finance/dto/finance.dto';
 import { NotificationOutboxService } from '../notifications/notification-outbox.service';
 import { NOVU_EVENT_TYPES } from '../notifications/novu.types';
 import { LoyaltyLedgerService } from '../loyalty/loyalty-ledger.service';
+import { AccountingOperationalPostingService } from '../accounting/accounting-operational-posting.service';
 import { OfflineOperationItemDto, RegisterDeviceDto, SyncPushDto } from './dto/sync.dto';
 
 @Injectable()
@@ -34,6 +35,7 @@ export class SyncService {
     private readonly db: DatabaseService,
     private readonly financeService: FinanceService,
     private readonly outboxService: NotificationOutboxService,
+    private readonly accountingPosting: AccountingOperationalPostingService,
     private readonly loyaltyLedger: LoyaltyLedgerService = new LoyaltyLedgerService(),
   ) {}
 
@@ -338,10 +340,6 @@ export class SyncService {
                 if (!Number.isFinite(unitPrice) || unitPrice < 0) {
                   throw new BadRequestException('Sale item unit prices must be finite non-negative numbers');
                 }
-                if (item.costAtSale !== undefined && item.costAtSale !== null &&
-                    (!Number.isFinite(Number(item.costAtSale)) || Number(item.costAtSale) < 0)) {
-                  throw new BadRequestException('Sale item costAtSale must be a finite non-negative number');
-                }
                 return sum + Math.round(unitPrice * 100) * item.quantity;
               }, 0);
               const subtotalCents = Math.round(Number(p.subtotal) * 100);
@@ -368,6 +366,7 @@ export class SyncService {
                   throw new BadRequestException('Customer does not belong to this business or is inactive');
                 }
               }
+              const variantSnapshots = new Map<string, { sellingPrice: string; purchasePrice: string }>();
               for (const item of p.items) {
                 if (!item || typeof item.variantId !== 'string' || !Number.isSafeInteger(item.quantity) || item.quantity <= 0) {
                   throw new BadRequestException('Each sale item requires a valid variant and a positive integer quantity');
@@ -376,7 +375,7 @@ export class SyncService {
                   throw new BadRequestException('Sale item unit prices must be finite non-negative numbers');
                 }
                 const [ownedVariant] = await operationTx
-                  .select({ id: variants.id })
+                  .select({ id: variants.id, sellingPrice: variants.sellingPrice, purchasePrice: variants.purchasePrice })
                   .from(variants)
                   .innerJoin(products, eq(variants.productId, products.id))
                   .where(and(
@@ -388,6 +387,13 @@ export class SyncService {
                 if (!ownedVariant) {
                   throw new BadRequestException('A sale item references a variant outside this business');
                 }
+                if (Math.round(Number(item.unitPrice) * 100) !== Math.round(Number(ownedVariant.sellingPrice) * 100)) {
+                  throw new ConflictException('Offline sale price no longer matches the server catalog; reconcile the sale before syncing');
+                }
+                variantSnapshots.set(item.variantId, {
+                  sellingPrice: ownedVariant.sellingPrice,
+                  purchasePrice: ownedVariant.purchasePrice,
+                });
               }
 
               const [sale] = await operationTx
@@ -411,16 +417,21 @@ export class SyncService {
               }
               entityId = sale.id;
 
-              // Insertion des lignes de vente et décrémentation atomique de stock
+              // Persist catalog-owned prices and cost snapshots, never client-supplied values.
+              const saleItemRows = [];
               if (p.items && Array.isArray(p.items)) {
                 for (const item of p.items) {
-                  await operationTx.insert(saleItems).values({
+                  const snapshot = variantSnapshots.get(item.variantId);
+                  if (!snapshot) throw new ConflictException('A sale item catalog snapshot is missing');
+                  const [saleItem] = await operationTx.insert(saleItems).values({
                     saleId: entityId!,
                     variantId: item.variantId,
                     quantity: item.quantity,
-                    unitPrice: item.unitPrice.toString(),
-                    costAtSale: item.costAtSale ? item.costAtSale.toString() : null,
-                  });
+                    unitPrice: snapshot.sellingPrice,
+                    costAtSale: snapshot.purchasePrice,
+                  }).returning();
+                  if (!saleItem) throw new ConflictException('A synchronized sale item could not be persisted');
+                  saleItemRows.push(saleItem);
 
                   // Décrémentation de stock (delta)
                   await operationTx
@@ -463,6 +474,8 @@ export class SyncService {
                   });
                 }
               }
+
+              const accounting = await this.accountingPosting.postSale(operationTx, tenant, sale!, saleItemRows);
 
               await this.loyaltyLedger.awardForSale(operationTx, {
                 businessId: tenant.businessId,
@@ -539,7 +552,9 @@ export class SyncService {
                   createdAt: op.clientTimestamp ? new Date(op.clientTimestamp) : new Date(),
                 })
                 .returning();
-              entityId = exp?.id || p.id;
+              if (!exp) throw new ConflictException('A synchronized expense could not be persisted');
+              entityId = exp.id;
+              await this.accountingPosting.postExpense(operationTx, tenant, exp);
               break;
             }
 
