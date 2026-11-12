@@ -184,6 +184,7 @@ export class AccountingOperationalPostingService {
     locationId: string;
     customerId: string | null;
     total: string;
+    saleDiscount: string;
     createdAt: Date;
   }, items: Array<{ quantity: number; condition: 'RESTOCK' | 'DAMAGED'; costAtSale: string | null }>) {
     let restockCost = 0n;
@@ -201,6 +202,16 @@ export class AccountingOperationalPostingService {
       else damagedCost += amount;
     }
 
+    const unavailableBases: AmountBasis[] = [];
+    if (accountingAmountToMinorUnits(returned.saleDiscount, 'sale.discount') > 0n) {
+      // Return.domain currently uses gross sale-item prices and has no
+      // persisted discount-allocation policy. Do not post an overstated
+      // customer credit until a deterministic allocation is specified.
+      unavailableBases.push('RETURN_TOTAL');
+    }
+    if (restockCostSnapshotMissing) unavailableBases.push('RETURN_RESTOCK_COST');
+    if (damagedCostSnapshotMissing) unavailableBases.push('RETURN_DAMAGED_COST');
+
     return this.postMappedEvent(tx, tenant, {
       sourceType: 'RETURN',
       sourceCategory: 'default',
@@ -214,10 +225,7 @@ export class AccountingOperationalPostingService {
         RETURN_RESTOCK_COST: restockCost,
         RETURN_DAMAGED_COST: damagedCost,
       },
-      unavailableBases: [
-        ...(restockCostSnapshotMissing ? ['RETURN_RESTOCK_COST' as const] : []),
-        ...(damagedCostSnapshotMissing ? ['RETURN_DAMAGED_COST' as const] : []),
-      ],
+      unavailableBases,
     });
   }
 
