@@ -16,11 +16,11 @@
 
 | Group | Tables | Rule |
 |---|---|---|
-| Direct tenant key | All business tables with `business_id`, including accounting, sales, purchases, inventory, finance, loyalty and operations | `business_id = boutica_current_business_id()` for USING and WITH CHECK. RLS enabled and forced. |
+| Direct tenant key | All business tables with `business_id`, including accounting, sales, purchases, inventory (including CUMP valuations), finance, loyalty and operations | `business_id = boutica_current_business_id()` for USING and WITH CHECK. RLS enabled and forced. |
 | Tenant root | `businesses` | SELECT active business or businesses with a membership for the actor; INSERT requires actor and preassigned current business ID; UPDATE is active-business only; no DELETE policy. |
 | Membership control plane | `business_members` | SELECT own memberships across businesses or all memberships in active business; INSERT is restricted to actor's own OWNER membership in active business; no UPDATE/DELETE policy. |
 | Child through parent | `sale_items`, `purchase_items`, `return_items` | Access requires a visible parent row; additional restrictive policies verify same-tenant variant and coherent return/sale-item relationships. |
-| Cross-tenant references | Sales, purchases, returns, payments, receivables, stock, stock movements, serials, cancellations, loyalty, audit, push and sync devices | Restrictive policies validate referenced records or membership belong to the same business. |
+| Cross-tenant references | Sales, purchases, returns, payments, receivables, stock, stock movements, CUMP inventory valuations, serials, cancellations, loyalty, audit, push and sync devices | Restrictive policies validate referenced records or membership belong to the same business. |
 | Transactional outbox | `notification_outbox` | Tenant-scoped SELECT/INSERT/UPDATE; cross-tenant claim only through a bounded SECURITY DEFINER function; per-row reads/updates use tenant transactions. |
 | Append-only ledgers | `audit_events`, `loyalty_ledger` | Tenant-scoped SELECT/INSERT only; no UPDATE/DELETE policy; audit SELECT is restricted to the generated ID column needed by INSERT RETURNING. |
 | Authentication control plane | `users`, `accounts`, `sessions`, `verifications` | Excluded pending dedicated auth connection/role; this remains a production release gate. |
@@ -28,7 +28,7 @@
 ## Required validation
 
 1. Fresh PostgreSQL 16 migration replay, including the exact Drizzle journal checksum.
-2. Confirm RLS enabled/forced and policies present on all 39 target tables.
+2. Confirm RLS enabled/forced and policies present on all 40 target tables.
 3. Verify the runtime role is NOBYPASSRLS and has no unintended role memberships.
 4. Two-business tests for SELECT, INSERT, UPDATE, DELETE, missing context, forged business IDs and child-row mismatch.
 5. Tests for business switching/listing, onboarding, additional business provisioning and membership revocation.
