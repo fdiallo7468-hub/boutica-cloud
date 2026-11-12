@@ -162,6 +162,20 @@
       "when": 1794418223000,
       "tag": "0022_accounting_purchase_payment_return_events",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794418224000,
+      "tag": "0023_inventory_cump_valuation",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794418225000,
+      "tag": "0024_stock_adjustment_accounting_event",
+      "breakpoints": true
     }
   ]
 }
