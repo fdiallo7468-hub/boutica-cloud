@@ -81,8 +81,9 @@ export class InventoryValuationService {
     const incomingValue = this.toMinorUnits(unitCost, 'purchase unit cost') * BigInt(quantity);
     const oldValue = existing ? this.toMinorUnits(existing.totalValue, 'stored inventory value') : 0n;
     const nextQuantity = stockQuantity + quantity;
-    const nextValue = oldValue + incomingValue;
-    const average = this.roundDivide(nextValue, BigInt(nextQuantity));
+    const weightedValue = oldValue + incomingValue;
+    const average = this.roundDivide(weightedValue, BigInt(nextQuantity));
+    const nextValue = average * BigInt(nextQuantity);
     if (existing) {
       const [updated] = await tx.update(inventoryValuations).set({
         quantity: nextQuantity,
@@ -118,9 +119,7 @@ export class InventoryValuationService {
     const average = this.toMinorUnits(valuation.averageUnitCost, 'average unit cost');
     const cost = average * BigInt(quantity);
     const nextQuantity = valuation.quantity - quantity;
-    const currentValue = this.toMinorUnits(valuation.totalValue, 'stored inventory value');
-    const nextValue = nextQuantity === 0 ? 0n : currentValue - cost;
-    if (nextValue < 0n) throw new ConflictException('CUMP rounding would make inventory value negative; reconcile the valuation');
+    const nextValue = average * BigInt(nextQuantity);
     await tx.update(inventoryValuations).set({
       quantity: nextQuantity,
       averageUnitCost: nextQuantity === 0 ? '0.00' : this.fromMinorUnits(this.roundDivide(nextValue, BigInt(nextQuantity))),
@@ -141,8 +140,9 @@ export class InventoryValuationService {
     }
     const restoredValue = this.toMinorUnits(historicalUnitCost, 'historical sale cost') * BigInt(quantity);
     const nextQuantity = valuation.quantity + quantity;
-    const nextValue = this.toMinorUnits(valuation.totalValue, 'stored inventory value') + restoredValue;
-    const average = this.roundDivide(nextValue, BigInt(nextQuantity));
+    const weightedValue = this.toMinorUnits(valuation.totalValue, 'stored inventory value') + restoredValue;
+    const average = this.roundDivide(weightedValue, BigInt(nextQuantity));
+    const nextValue = average * BigInt(nextQuantity);
     await tx.update(inventoryValuations).set({
       quantity: nextQuantity,
       averageUnitCost: this.fromMinorUnits(average),
