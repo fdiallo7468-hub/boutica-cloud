@@ -1,3 +1,5 @@
+import { PERMISSIONS } from '../auth/permissions/permission-catalog';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import {
   BadRequestException,
   Body,
@@ -26,6 +28,7 @@ import { UpdateSupplierDto } from './dto/update-supplier.dto';
 export class SuppliersController {
   constructor(private readonly db: DatabaseService) {}
 
+  @RequirePermissions(PERMISSIONS.PURCHASING_READ)
   @Get()
   async list(
     @CurrentTenant() tenant: Tenant,
@@ -43,6 +46,7 @@ export class SuppliersController {
     return { data, page: query.page, pageSize: query.pageSize, total };
   }
 
+  @RequirePermissions(PERMISSIONS.PURCHASING_READ)
   @Get(':id')
   async get(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) id: string) {
     const [supplier] = await this.db.db
@@ -53,6 +57,7 @@ export class SuppliersController {
     return supplier;
   }
 
+  @RequirePermissions(PERMISSIONS.PURCHASING_MANAGE)
   @Post()
   async create(@CurrentTenant() tenant: Tenant, @Body() body: CreateSupplierDto) {
     const [supplier] = await this.db.db
@@ -62,6 +67,7 @@ export class SuppliersController {
     return supplier;
   }
 
+  @RequirePermissions(PERMISSIONS.PURCHASING_MANAGE)
   @Patch(':id')
   async update(
     @CurrentTenant() tenant: Tenant,
@@ -88,6 +94,7 @@ export class SuppliersController {
 
   // Historical purchases keep their supplier reference intact.
   // DELETE is therefore a reversible archive, not a physical row deletion.
+  @RequirePermissions(PERMISSIONS.PURCHASING_MANAGE)
   @Delete(':id')
   async archive(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) id: string) {
     const [supplier] = await this.db.db
