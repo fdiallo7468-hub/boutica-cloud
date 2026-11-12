@@ -239,6 +239,48 @@ describe('Accounting operational posting (e2e)', () => {
     expect(trialBalance.body.totals.balanced).toBe(true);
   });
 
+  it('reverses the original sale entry when an eligible sale is cancelled', async () => {
+    const { accessToken } = await registerBusiness(app, 'Accounting sale cancellation');
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const year = new Date().getUTCFullYear();
+    const startDate = `${year}-01-01`;
+    const endDate = `${year}-12-31`;
+    await request(app.getHttpServer()).put('/api/v1/accounting/profile').set(auth).send({}).expect(200);
+    const fiscalYear = await request(app.getHttpServer()).post('/api/v1/accounting/fiscal-years').set(auth)
+      .send({ code: `FY-${year}`, label: `Exercice ${year}`, startDate, endDate }).expect(201);
+    await request(app.getHttpServer()).post('/api/v1/accounting/periods').set(auth)
+      .send({ fiscalYearId: fiscalYear.body.id, code: `P-${year}`, label: `Période ${year}`, startDate, endDate }).expect(201);
+    const salesJournal = await request(app.getHttpServer()).post('/api/v1/accounting/journals').set(auth)
+      .send({ code: 'VTE', label: 'Journal des ventes', journalType: 'SALES', sequencePrefix: 'VTE-' }).expect(201);
+    const customerAccount = await request(app.getHttpServer()).post('/api/v1/accounting/accounts').set(auth)
+      .send({ accountNumber: '411', label: 'Clients', class: 4, normalBalance: 'DEBIT', isPostable: true }).expect(201);
+    const revenueAccount = await request(app.getHttpServer()).post('/api/v1/accounting/accounts').set(auth)
+      .send({ accountNumber: '701', label: 'Ventes', class: 7, normalBalance: 'CREDIT', isPostable: true }).expect(201);
+    const customer = await request(app.getHttpServer()).post('/api/v1/customers').set(auth)
+      .send({ name: 'Client annulation' }).expect(201);
+    await request(app.getHttpServer()).put('/api/v1/accounting/event-mappings/SALE/default').set(auth).send({
+      journalId: salesJournal.body.id,
+      lines: [
+        { accountId: customerAccount.body.id, side: 'DEBIT', amountBasis: 'SALE_TOTAL', auxiliaryType: 'CUSTOMER' },
+        { accountId: revenueAccount.body.id, side: 'CREDIT', amountBasis: 'SALE_TOTAL' },
+      ],
+    }).expect(200);
+    const { variantId } = await createProductWithVariant(app, accessToken, { sellingPrice: 125, purchasePrice: 50 });
+    await adjustStock(app, accessToken, variantId, 2);
+    const sale = await request(app.getHttpServer()).post('/api/v1/sales').set(auth).send({
+      customerId: customer.body.id,
+      items: [{ variantId, quantity: 1 }],
+    }).expect(201);
+    expect(sale.body.accounting.status).toBe('POSTED');
+
+    const cancelled = await request(app.getHttpServer()).post(`/api/v1/sales/${sale.body.id}/cancel`).set(auth)
+      .send({}).expect(200);
+    expect(cancelled.body.accounting).toMatchObject({ status: 'REVERSED' });
+    const trialBalance = await request(app.getHttpServer()).get('/api/v1/accounting/trial-balance').set(auth).expect(200);
+    expect(trialBalance.body.totals.debit).toBe(trialBalance.body.totals.credit);
+    expect(trialBalance.body.totals.balanced).toBe(true);
+  });
+
   it('reconciles opening balances, customer/supplier auxiliaries and the trial balance', async () => {
     const { accessToken, businessId } = await registerBusiness(app, 'Accounting opening balance');
     const auth = { Authorization: `Bearer ${accessToken}` };
