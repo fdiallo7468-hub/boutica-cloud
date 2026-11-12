@@ -18,6 +18,13 @@ export class InventoryValuationService {
     return BigInt(whole) * 100n + BigInt((fraction + '00').slice(0, 2));
   }
 
+  extendedValue(unitCost: string | number, quantity: number): string {
+    if (!Number.isSafeInteger(quantity) || quantity < 0) {
+      throw new ConflictException('Inventory valuation quantity must be a non-negative safe integer');
+    }
+    return this.fromMinorUnits(this.toMinorUnits(unitCost, 'unit cost') * BigInt(quantity));
+  }
+
   private fromMinorUnits(value: bigint): string {
     if (value < 0n) throw new ConflictException('Inventory valuation cannot become negative');
     return `${value / 100n}.${String(value % 100n).padStart(2, '0')}`;
