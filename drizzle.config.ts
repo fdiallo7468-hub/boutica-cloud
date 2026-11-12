@@ -1,14 +1,20 @@
 import 'dotenv/config';
 import { defineConfig } from 'drizzle-kit';
 
-const migrationDatabaseUrl = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
+const migrationDatabaseUrl =
+  process.env.DATABASE_MIGRATION_URL ??
+  process.env.DATABASE_URL_UNPOOLED ??
+  (process.env.NODE_ENV === 'production' ? undefined : process.env.DATABASE_URL);
+
 if (!migrationDatabaseUrl) {
-  throw new Error('DATABASE_URL_UNPOOLED (preferred) or DATABASE_URL is required for Drizzle migrations');
+  throw new Error(
+    'DATABASE_MIGRATION_URL is required for production migrations; use a direct PostgreSQL connection owned by this deployment',
+  );
 }
 
-const migrationHost = new URL(migrationDatabaseUrl).hostname;
-if (migrationHost.includes('-pooler')) {
-  throw new Error('Drizzle migrations require a direct, unpooled PostgreSQL connection; configure DATABASE_URL_UNPOOLED');
+const parsedMigrationUrl = new URL(migrationDatabaseUrl);
+if (!['postgres:', 'postgresql:'].includes(parsedMigrationUrl.protocol)) {
+  throw new Error('DATABASE_MIGRATION_URL must be a PostgreSQL connection string');
 }
 
 export default defineConfig({
