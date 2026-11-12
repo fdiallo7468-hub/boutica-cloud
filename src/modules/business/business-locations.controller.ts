@@ -5,12 +5,10 @@ import {
   Param,
   Patch,
   Post,
-  UseGuards,
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { CurrentTenant } from "../auth/current-tenant.decorator";
 import { Tenant } from "../auth/tenant.type";
-import { PermissionGuard } from "../auth/permissions/permission.guard";
 import { RequirePermissions } from "../auth/permissions/require-permissions.decorator";
 import { PERMISSIONS } from "../auth/permissions/permission-catalog";
 import {
@@ -21,7 +19,6 @@ import { BusinessLocationsService } from "./business-locations.service";
 
 @ApiTags("business-locations")
 @Controller("api/v1/business/locations")
-@UseGuards(PermissionGuard)
 export class BusinessLocationsController {
   constructor(private readonly locations: BusinessLocationsService) {}
 
