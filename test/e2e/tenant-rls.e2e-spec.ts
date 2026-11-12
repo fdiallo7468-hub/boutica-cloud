@@ -118,6 +118,9 @@ describe('PostgreSQL tenant RLS (e2e)', () => {
       });
       return business;
     });
+    if (!created) {
+      throw new Error('Expected tenant business bootstrap to return the inserted business');
+    }
     expect(created.id).toBe(newBusinessId);
 
     await expect(db.baseDb.transaction(async (tx) => {
