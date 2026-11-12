@@ -11,10 +11,11 @@ import {
   Patch,
   Param,
 } from '@nestjs/common';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
 import {
   accountingAccounts,
+  accountingEventMappingLines,
   accountingEventMappings,
   accountingFiscalYears,
   accountingJournals,
@@ -403,9 +404,21 @@ export class AccountingController {
   @RequirePermissions(PERMISSIONS.ACCOUNTING_READ)
   @Get('event-mappings')
   async listEventMappings(@CurrentTenant() tenant: Tenant) {
-    return this.database.db.select().from(accountingEventMappings)
+    const mappings = await this.database.db.select().from(accountingEventMappings)
       .where(eq(accountingEventMappings.businessId, tenant.businessId))
       .orderBy(asc(accountingEventMappings.sourceType), asc(accountingEventMappings.sourceCategory));
+    if (!mappings.length) return [];
+    const lines = await this.database.db.select().from(accountingEventMappingLines).where(and(
+      eq(accountingEventMappingLines.businessId, tenant.businessId),
+      inArray(accountingEventMappingLines.mappingId, mappings.map((mapping) => mapping.id)),
+    )).orderBy(asc(accountingEventMappingLines.lineNumber));
+    const linesByMapping = new Map<string, typeof lines>();
+    for (const line of lines) {
+      const group = linesByMapping.get(line.mappingId) ?? [];
+      group.push(line);
+      linesByMapping.set(line.mappingId, group);
+    }
+    return mappings.map((mapping) => ({ ...mapping, lines: linesByMapping.get(mapping.id) ?? [] }));
   }
 
   @RequirePermissions(PERMISSIONS.ACCOUNTING_MANAGE)
@@ -430,19 +443,130 @@ export class AccountingController {
     }
     const accounts = await this.database.db.select().from(accountingAccounts).where(and(
       eq(accountingAccounts.businessId, tenant.businessId),
-      sql`${accountingAccounts.id} IN (${sql.join([sql`${debitAccountId}::uuid`, sql`${creditAccountId}::uuid`], sql`, `)})`,
+      inArray(accountingAccounts.id, [debitAccountId, creditAccountId]),
     ));
     if (accounts.length !== 2 || accounts.some((account) => !account.isActive || !account.isPostable)) {
       throw new BadRequestException('Both mapped accounts must be active, postable and owned by this business');
     }
-    const [mapping] = await this.database.db.insert(accountingEventMappings).values({
-      businessId: tenant.businessId, sourceType: 'EXPENSE', sourceCategory, journalId,
-      debitAccountId, creditAccountId, isActive: true, updatedAt: new Date(),
-    }).onConflictDoUpdate({
-      target: [accountingEventMappings.businessId, accountingEventMappings.sourceType, accountingEventMappings.sourceCategory],
-      set: { journalId, debitAccountId, creditAccountId, isActive: true, updatedAt: new Date() },
-    }).returning();
-    return mapping;
+
+    return this.database.db.transaction(async (tx) => {
+      const [mapping] = await tx.insert(accountingEventMappings).values({
+        businessId: tenant.businessId, sourceType: 'EXPENSE', sourceCategory, journalId,
+        debitAccountId, creditAccountId, isActive: true, updatedAt: new Date(),
+      }).onConflictDoUpdate({
+        target: [accountingEventMappings.businessId, accountingEventMappings.sourceType, accountingEventMappings.sourceCategory],
+        set: { journalId, debitAccountId, creditAccountId, isActive: true, updatedAt: new Date() },
+      }).returning();
+      if (!mapping) throw new ConflictException('Could not save the expense accounting template');
+      await tx.delete(accountingEventMappingLines).where(and(
+        eq(accountingEventMappingLines.businessId, tenant.businessId),
+        eq(accountingEventMappingLines.mappingId, mapping.id),
+      ));
+      const lines = await tx.insert(accountingEventMappingLines).values([
+        { businessId: tenant.businessId, mappingId: mapping.id, lineNumber: 1, accountId: debitAccountId, side: 'DEBIT', amountBasis: 'EXPENSE_AMOUNT', percentage: '100.0000' },
+        { businessId: tenant.businessId, mappingId: mapping.id, lineNumber: 2, accountId: creditAccountId, side: 'CREDIT', amountBasis: 'EXPENSE_AMOUNT', percentage: '100.0000' },
+      ]).returning();
+      return { ...mapping, lines };
+    });
+  }
+
+  @RequirePermissions(PERMISSIONS.ACCOUNTING_MANAGE)
+  @Put('event-mappings/:sourceType/:category')
+  async configureSaleMapping(
+    @CurrentTenant() tenant: Tenant,
+    @Param('sourceType') sourceTypeParam: string,
+    @Param('category') categoryParam: string,
+    @Body() body: { journalId?: unknown; lines?: unknown },
+  ) {
+    await this.requireProfile(tenant.businessId);
+    const sourceType = requiredText(sourceTypeParam, 'sourceType', 20).toUpperCase();
+    if (sourceType !== 'SALE') {
+      throw new BadRequestException('This multi-line configuration endpoint currently supports SALE events only');
+    }
+    const sourceCategory = requiredText(decodeURIComponent(categoryParam), 'category', 80).toLowerCase();
+    if (sourceCategory !== 'default') {
+      throw new BadRequestException('SALE mappings currently use the fixed category "default"');
+    }
+    const journalId = requiredText(body.journalId, 'journalId', 36);
+    if (!Array.isArray(body.lines) || body.lines.length < 2 || body.lines.length > 200) {
+      throw new BadRequestException('A posting template must contain between 2 and 200 lines');
+    }
+
+    const allowedBases = new Set(['SALE_TOTAL', 'SALE_SUBTOTAL', 'SALE_DISCOUNT', 'SALE_COST_AT_SALE']);
+    const normalizedLines = body.lines.map((raw, index) => {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        throw new BadRequestException(`lines[${index}] must be an object`);
+      }
+      const line = raw as Record<string, unknown>;
+      const accountId = requiredText(line.accountId, `lines[${index}].accountId`, 36);
+      if (line.side !== 'DEBIT' && line.side !== 'CREDIT') {
+        throw new BadRequestException(`lines[${index}].side must be DEBIT or CREDIT`);
+      }
+      if (typeof line.amountBasis !== 'string' || !allowedBases.has(line.amountBasis)) {
+        throw new BadRequestException(`lines[${index}].amountBasis is not supported for SALE`);
+      }
+      const percentage = line.percentage === undefined ? '100.0000' : String(line.percentage);
+      if (!/^\d{1,3}(?:\.\d{1,4})?$/.test(percentage) || Number(percentage) <= 0 || Number(percentage) > 100) {
+        throw new BadRequestException(`lines[${index}].percentage must be greater than 0 and at most 100, with up to 4 decimals`);
+      }
+      const auxiliaryType = line.auxiliaryType === undefined || line.auxiliaryType === null
+        ? null
+        : line.auxiliaryType;
+      if (auxiliaryType !== null && auxiliaryType !== 'CUSTOMER') {
+        throw new BadRequestException(`lines[${index}].auxiliaryType must be CUSTOMER for SALE`);
+      }
+      return { accountId, side: line.side as 'DEBIT' | 'CREDIT', amountBasis: line.amountBasis, percentage, auxiliaryType };
+    });
+    if (!normalizedLines.some((line) => line.side === 'DEBIT') || !normalizedLines.some((line) => line.side === 'CREDIT')) {
+      throw new BadRequestException('A posting template must contain at least one debit and one credit line');
+    }
+
+    const [journal] = await this.database.db.select().from(accountingJournals).where(and(
+      eq(accountingJournals.id, journalId), eq(accountingJournals.businessId, tenant.businessId),
+    )).limit(1);
+    if (!journal || !journal.isActive || !['SALES', 'GENERAL'].includes(journal.journalType)) {
+      throw new BadRequestException('An active SALES or GENERAL journal belonging to this business is required');
+    }
+    const accountIds = [...new Set(normalizedLines.map((line) => line.accountId))];
+    const accounts = await this.database.db.select().from(accountingAccounts).where(and(
+      eq(accountingAccounts.businessId, tenant.businessId),
+      inArray(accountingAccounts.id, accountIds),
+    ));
+    if (accounts.length !== accountIds.length || accounts.some((account) => !account.isActive || !account.isPostable)) {
+      throw new BadRequestException('Every template account must be active, postable and owned by this business');
+    }
+
+    return this.database.db.transaction(async (tx) => {
+      const [mapping] = await tx.insert(accountingEventMappings).values({
+        businessId: tenant.businessId,
+        sourceType: 'SALE',
+        sourceCategory,
+        journalId,
+        debitAccountId: null,
+        creditAccountId: null,
+        isActive: true,
+        updatedAt: new Date(),
+      }).onConflictDoUpdate({
+        target: [accountingEventMappings.businessId, accountingEventMappings.sourceType, accountingEventMappings.sourceCategory],
+        set: { journalId, debitAccountId: null, creditAccountId: null, isActive: true, updatedAt: new Date() },
+      }).returning();
+      if (!mapping) throw new ConflictException('Could not save the sale accounting template');
+      await tx.delete(accountingEventMappingLines).where(and(
+        eq(accountingEventMappingLines.businessId, tenant.businessId),
+        eq(accountingEventMappingLines.mappingId, mapping.id),
+      ));
+      const lines = await tx.insert(accountingEventMappingLines).values(normalizedLines.map((line, index) => ({
+        businessId: tenant.businessId,
+        mappingId: mapping.id,
+        lineNumber: index + 1,
+        accountId: line.accountId,
+        side: line.side,
+        amountBasis: line.amountBasis,
+        percentage: line.percentage,
+        auxiliaryType: line.auxiliaryType,
+      }))).returning();
+      return { ...mapping, lines };
+    });
   }
 
   private async requireProfile(businessId: string): Promise<void> {
