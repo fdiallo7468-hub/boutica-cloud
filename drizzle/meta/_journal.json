@@ -148,6 +148,13 @@
       "when": 1794418221581,
       "tag": "0020_tenant_row_level_security",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794418222000,
+      "tag": "0021_accounting_multi_line_posting_templates",
+      "breakpoints": true
     }
   ]
 }
