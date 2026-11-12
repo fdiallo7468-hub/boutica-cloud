@@ -155,6 +155,13 @@
       "when": 1794418222000,
       "tag": "0021_accounting_multi_line_posting_templates",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794418223000,
+      "tag": "0022_accounting_purchase_payment_return_events",
+      "breakpoints": true
     }
   ]
 }
