@@ -8,6 +8,7 @@ import {
   integer,
   jsonb,
   numeric,
+  primaryKey,
   pgEnum,
   pgTable,
   text,
@@ -367,6 +368,26 @@ export const stockMovements = pgTable(
   (t) => ({
     variantDateIdx: index('stock_movements_variant_date_idx').on(t.variantId, t.createdAt),
     businessIdx: index('stock_movements_business_idx').on(t.businessId),
+  }),
+);
+
+export const inventoryValuations = pgTable(
+  'inventory_valuations',
+  {
+    businessId: uuid('business_id').notNull().references(() => businesses.id, { onDelete: 'cascade' }),
+    variantId: uuid('variant_id').notNull().references(() => variants.id, { onDelete: 'cascade' }),
+    quantity: integer('quantity').notNull().default(0),
+    averageUnitCost: numeric('average_unit_cost', { precision: 14, scale: 2 }).notNull().default('0'),
+    totalValue: numeric('total_value', { precision: 18, scale: 2 }).notNull().default('0'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    primary: primaryKey({ columns: [t.businessId, t.variantId], name: 'inventory_valuations_pkey' }),
+    businessIdx: index('inventory_valuations_business_idx').on(t.businessId),
+    quantityNonNegative: check('inventory_valuations_quantity_non_negative', sql`${t.quantity} >= 0`),
+    averageNonNegative: check('inventory_valuations_average_non_negative', sql`${t.averageUnitCost} >= 0`),
+    totalNonNegative: check('inventory_valuations_total_non_negative', sql`${t.totalValue} >= 0`),
   }),
 );
 
