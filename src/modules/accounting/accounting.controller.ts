@@ -486,26 +486,32 @@ export class AccountingController {
       PURCHASE: ['PURCHASE', 'GENERAL'],
       PAYMENT: ['CASH', 'BANK', 'GENERAL'],
       RETURN: ['SALES', 'GENERAL'],
+      STOCK_ADJUSTMENT: ['GENERAL'],
     };
     const amountBases: Record<string, Set<string>> = {
       SALE: new Set(['SALE_TOTAL', 'SALE_SUBTOTAL', 'SALE_DISCOUNT', 'SALE_COST_AT_SALE']),
       PURCHASE: new Set(['PURCHASE_TOTAL']),
       PAYMENT: new Set(['PAYMENT_AMOUNT']),
       RETURN: new Set(['RETURN_TOTAL', 'RETURN_RESTOCK_COST', 'RETURN_DAMAGED_COST']),
+      STOCK_ADJUSTMENT: new Set(['STOCK_ADJUSTMENT_VALUE']),
     };
     const auxiliaryTypes: Record<string, string | null> = {
       SALE: 'CUSTOMER',
       PURCHASE: 'SUPPLIER',
       PAYMENT: 'CUSTOMER',
       RETURN: 'CUSTOMER',
+      STOCK_ADJUSTMENT: null,
     };
     if (!journalTypes[sourceType]) {
-      throw new BadRequestException('Supported operational mapping types are SALE, PURCHASE, PAYMENT and RETURN');
+      throw new BadRequestException('Supported operational mapping types are SALE, PURCHASE, PAYMENT, RETURN and STOCK_ADJUSTMENT');
     }
     if (sourceType === 'SALE' || sourceType === 'PURCHASE' || sourceType === 'RETURN') {
       if (category !== 'default') {
         throw new BadRequestException(`${sourceType} mappings currently use the fixed category "default"`);
       }
+    }
+    if (sourceType === 'STOCK_ADJUSTMENT' && category !== 'increase' && category !== 'decrease') {
+      throw new BadRequestException('STOCK_ADJUSTMENT category must be increase or decrease');
     }
     if (sourceType === 'PAYMENT' && !/^(cash|orange_money|moov_money|bank_transfer|card|wave|other):(settlement|unallocated)$/.test(category)) {
       throw new BadRequestException('PAYMENT category must be <payment_method>:<settlement|unallocated>');
