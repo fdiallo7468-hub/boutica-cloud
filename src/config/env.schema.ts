@@ -155,7 +155,8 @@ const rawEnvSchema = z.object({
 
   DATABASE_URL: z.string().optional(),
   // Direct PostgreSQL connection used only by Drizzle migration tooling; never by API request pools.
-  DATABASE_URL_UNPOOLED: z.string().optional(),
+  DATABASE_URL_UNPOOLED: z.string().optional(), // legacy alias; prefer DATABASE_MIGRATION_URL
+  DATABASE_MIGRATION_URL: z.string().optional(),
   BETTER_AUTH_SECRET: z.string().optional(),
   BETTER_AUTH_URL: z.string().optional(),
   CORS_ORIGIN: z.string().optional(),
