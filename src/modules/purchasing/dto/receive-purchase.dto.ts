@@ -22,6 +22,10 @@ export class PurchaseItemDto {
 export class ReceivePurchaseDto {
   @IsOptional()
   @IsUUID()
+  locationId?: string;
+
+  @IsOptional()
+  @IsUUID()
   supplierId?: string;
 
   @IsArray()
