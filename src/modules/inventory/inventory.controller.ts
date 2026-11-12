@@ -1,6 +1,6 @@
 import { PERMISSIONS } from '../auth/permissions/permission-catalog';
 import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
-import { BadRequestException, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Post, Body } from '@nestjs/common';
+import { BadRequestException, ConflictException, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Post, Body } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { and, eq } from 'drizzle-orm';
 import { DatabaseService } from '../../infrastructure/database/database';
@@ -11,6 +11,7 @@ import { Tenant } from '../auth/tenant.type';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { InitializeOpeningValuationDto } from './dto/initialize-opening-valuation.dto';
 import { InventoryValuationService } from './inventory-valuation.service';
+import { AccountingOperationalPostingService } from '../accounting/accounting-operational-posting.service';
 
 @ApiTags('inventory')
 @Controller('api/v1/inventory')
@@ -19,6 +20,7 @@ export class InventoryController {
     private readonly db: DatabaseService,
     private readonly auditEvents: AuditEventsService = new AuditEventsService(),
     private readonly valuationService: InventoryValuationService = new InventoryValuationService(),
+    private readonly accountingPosting: AccountingOperationalPostingService,
   ) {}
 
   @RequirePermissions(PERMISSIONS.INVENTORY_READ)
@@ -89,13 +91,16 @@ export class InventoryController {
         .for('update');
       const previousQuantity = current?.quantity ?? 0;
       const delta = body.quantity - previousQuantity;
+      let adjustmentValue: string | null = null;
       if (delta > 0) {
         if (body.unitCost === undefined) {
           throw new BadRequestException('unitCost is required for a positive stock adjustment under CUMP');
         }
         await this.valuationService.receive(tx, tenant.businessId, variantId, delta, body.unitCost);
+        adjustmentValue = this.valuationService.extendedValue(body.unitCost, delta);
       } else if (delta < 0) {
-        await this.valuationService.adjustDown(tx, tenant.businessId, variantId, Math.abs(delta));
+        const averageUnitCost = await this.valuationService.adjustDown(tx, tenant.businessId, variantId, Math.abs(delta));
+        adjustmentValue = this.valuationService.extendedValue(averageUnitCost, Math.abs(delta));
       }
 
       const [updated] = await tx
@@ -114,14 +119,16 @@ export class InventoryController {
       // FIX (P2-2): manual adjustments used to bypass stock_movements
       // entirely, silently breaking the audit trail the table exists for.
       if (delta !== 0) {
-        await tx.insert(stockMovements).values({
+        const [movement] = await tx.insert(stockMovements).values({
           businessId: tenant.businessId,
           locationId: location.id,
           variantId,
           type: 'ADJUSTMENT',
           quantity: delta,
           note: body.note,
-        });
+        }).returning();
+        if (!movement || adjustmentValue === null) throw new ConflictException('Could not persist the valued stock adjustment');
+        const accounting = await this.accountingPosting.postStockAdjustment(tx, tenant, movement, adjustmentValue);
         await this.auditEvents.appendInTransaction(tx, {
           businessId: tenant.businessId,
           actorUserId: tenant.userId,
@@ -129,7 +136,7 @@ export class InventoryController {
           action: 'stock.adjusted',
           resourceType: 'variant',
           resourceId: variantId,
-          metadata: { previousQuantity, newQuantity: body.quantity, delta },
+          metadata: { previousQuantity, newQuantity: body.quantity, delta, adjustmentValue, accountingStatus: accounting.status },
         });
       }
 
