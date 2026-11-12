@@ -50,23 +50,24 @@ type PostingEvent = {
   unavailableBases?: AmountBasis[];
 };
 
-function percentageToBasisPoints(value: string | number): bigint {
+function percentageToPartsPerMillion(value: string | number): bigint {
   const raw = String(value);
   if (!/^\d{1,3}(?:\.\d{1,4})?$/.test(raw)) {
     throw new ConflictException('An accounting template contains an invalid percentage');
   }
   const [whole, fraction = ''] = raw.split('.');
-  const basisPoints = BigInt(whole ?? '0') * 10_000n + BigInt(fraction.padEnd(4, '0'));
-  if (basisPoints <= 0n || basisPoints > 1_000_000n) {
+  const partsPerMillion = BigInt(whole ?? '0') * 10_000n + BigInt(fraction.padEnd(4, '0'));
+  if (partsPerMillion <= 0n || partsPerMillion > 1_000_000n) {
     throw new ConflictException('An accounting template percentage must be greater than 0 and at most 100');
   }
-  return basisPoints;
+  return partsPerMillion;
 }
 
 function applyPercentage(amount: bigint, percentage: string | number): bigint {
-  const basisPoints = percentageToBasisPoints(percentage);
+  const partsPerMillion = percentageToPartsPerMillion(percentage);
+  // Percentages have four decimal places: 100.0000% = 1,000,000 ppm.
   // Round half-up to the currency's minor unit using integer arithmetic.
-  return (amount * basisPoints + 5_000n) / 10_000n;
+  return (amount * partsPerMillion + 500_000n) / 1_000_000n;
 }
 
 @Injectable()
