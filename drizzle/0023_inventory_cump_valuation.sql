@@ -14,5 +14,34 @@ CREATE TABLE IF NOT EXISTS public.inventory_valuations (
   CONSTRAINT inventory_valuations_average_non_negative CHECK (average_unit_cost >= 0),
   CONSTRAINT inventory_valuations_total_non_negative CHECK (total_value >= 0)
 );
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS inventory_valuations_business_idx
   ON public.inventory_valuations (business_id);
+--> statement-breakpoint
+
+-- This is tenant data: enable and FORCE RLS and grant only scoped runtime CRUD.
+ALTER TABLE public.inventory_valuations ENABLE ROW LEVEL SECURITY;
+--> statement-breakpoint
+ALTER TABLE public.inventory_valuations FORCE ROW LEVEL SECURITY;
+--> statement-breakpoint
+CREATE POLICY boutica_tenant_isolation ON public.inventory_valuations
+  FOR ALL TO boutica_runtime
+  USING (business_id = public.boutica_current_business_id())
+  WITH CHECK (business_id = public.boutica_current_business_id());
+--> statement-breakpoint
+CREATE POLICY inventory_valuations_variant_same_tenant ON public.inventory_valuations AS RESTRICTIVE
+  FOR ALL TO boutica_runtime
+  USING (EXISTS (
+    SELECT 1 FROM public.variants v
+    WHERE v.id = inventory_valuations.variant_id
+      AND v.business_id = inventory_valuations.business_id
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.variants v
+    WHERE v.id = inventory_valuations.variant_id
+      AND v.business_id = inventory_valuations.business_id
+  ));
+--> statement-breakpoint
+REVOKE ALL ON TABLE public.inventory_valuations FROM boutica_runtime;
+--> statement-breakpoint
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.inventory_valuations TO boutica_runtime;
