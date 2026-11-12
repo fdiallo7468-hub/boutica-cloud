@@ -6,6 +6,6 @@ export class InitializeOpeningValuationDto {
   quantity: number;
 
   @IsString()
-  @Matches(/^\\d+(?:\\.\\d{1,2})?$/)
+  @Matches(/^\d+(?:\.\d{1,2})?$/)
   unitCost: string;
 }
