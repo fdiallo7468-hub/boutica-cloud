@@ -27,7 +27,7 @@ The ledger engine supports balanced entries with 2–200 lines, source reference
 
 | Event | Source data available | Required accounting treatment | Current blocker |
 |---|---|---|---|
-| Sale completed | Sale subtotal, discount, net total, item quantities, sale-time cost snapshots, customer, location | Receivable/revenue/discount plus cost-of-sales/inventory lines | Needs multi-line templates; tax treatment is not modelled |
+| Sale completed | Sale subtotal, discount, net total, item quantities, sale-time cost snapshots, customer, location | Receivable/revenue/discount plus cost-of-sales/inventory lines | Implemented with tenant-configured multi-line templates; tax treatment is not modelled |
 | Purchase received | Purchase total, item quantities/prices, optional supplier, location | Inventory/expense and supplier or clearing counterpart | Supplier is optional; tax/freight/discount treatment is not modelled |
 | Payment confirmed | Amount, payment method, customer, optional sale/receivable | Treasury account against receivable, advance, or other applicable account | Mapping must vary by payment method and linkage; exact cash/bank account is business-configured |
 | Payment cancelled | Original payment and cancellation record | Reverse the original payment entry exactly once | Must link to the original accounting entry and use the ledger reversal mechanism |
