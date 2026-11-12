@@ -14,6 +14,7 @@ import { NotificationOutboxService } from '../../notifications/notification-outb
 import { NOVU_EVENT_TYPES } from '../../notifications/novu.types';
 import { getStockNotificationTransitions } from '../../notifications/notification-events';
 import { LoyaltyLedgerService } from '../../loyalty/loyalty-ledger.service';
+import { AccountingOperationalPostingService } from '../../accounting/accounting-operational-posting.service';
 
 const ENDPOINT = 'sales.create';
 
@@ -29,6 +30,7 @@ export class CreateSaleUseCase {
     private readonly outboxService: NotificationOutboxService,
     private readonly loyaltyLedger: LoyaltyLedgerService = new LoyaltyLedgerService(),
     private readonly auditEvents: AuditEventsService = new AuditEventsService(),
+    private readonly accountingPosting: AccountingOperationalPostingService,
   ) {}
 
   async execute(tenant: Tenant, dto: CreateSaleDto, idempotencyKey: string | undefined): Promise<CreateSaleResult> {
@@ -217,6 +219,8 @@ export class CreateSaleUseCase {
         });
       }
 
+      const accounting = await this.accountingPosting.postSale(tx, tenant, saleRow!, itemRows);
+
       await this.loyaltyLedger.awardForSale(tx, {
         businessId: tenant.businessId,
         customerId: dto.customerId,
@@ -225,7 +229,7 @@ export class CreateSaleUseCase {
         total: total.toDecimalString(),
       });
 
-      const responseBody = { ...saleRow, items: itemRows };
+      const responseBody = { ...saleRow, items: itemRows, accounting };
 
       // Enqueue transactional outbox event for Novu
       await this.outboxService.enqueue(tx, {
