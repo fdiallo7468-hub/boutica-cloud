@@ -20,6 +20,7 @@ import { Tenant } from '../../auth/tenant.type';
 import { Return, SaleItemReturnableInfo } from '../domain/return';
 import { CreateReturnDto } from '../dto/create-return.dto';
 import { LoyaltyLedgerService } from '../../loyalty/loyalty-ledger.service';
+import { AccountingOperationalPostingService } from '../../accounting/accounting-operational-posting.service';
 
 const ENDPOINT = 'returns.create';
 
@@ -32,6 +33,7 @@ export interface CreateReturnResult {
 export class CreateReturnUseCase {
   constructor(
     private readonly db: DatabaseService,
+    private readonly accountingPosting: AccountingOperationalPostingService,
     private readonly loyaltyLedger: LoyaltyLedgerService = new LoyaltyLedgerService(),
     private readonly auditEvents: AuditEventsService = new AuditEventsService(),
   ) {}
@@ -178,7 +180,18 @@ export class CreateReturnUseCase {
         actorUserId: tenant.userId,
       });
 
-      const responseBody = { ...returnRow, items: itemRows };
+      const saleItemById = new Map(lockedSaleItems.map((item) => [item.id, item]));
+      const accounting = await this.accountingPosting.postReturn(tx, tenant, {
+        ...returnRow!,
+        locationId: sale.locationId,
+        customerId: sale.customerId,
+      }, returnEntity.items.map((item) => ({
+        quantity: item.quantity.value,
+        condition: item.condition,
+        costAtSale: saleItemById.get(item.saleItemId)?.costAtSale ?? null,
+      })));
+
+      const responseBody = { ...returnRow, items: itemRows, accounting };
 
       if (idempotencyKey) {
         await tx.insert(idempotencyKeys).values({
