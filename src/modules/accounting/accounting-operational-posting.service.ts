@@ -107,7 +107,7 @@ export class AccountingOperationalPostingService {
     let costAtSale = 0n;
     const unavailableBases: AmountBasis[] = [];
     for (const item of items) {
-      if (item.costAtSale === null) {
+      if (item.costAtSale == null) {
         unavailableBases.push('SALE_COST_AT_SALE');
         continue;
       }
