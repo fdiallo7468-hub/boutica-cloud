@@ -10,6 +10,7 @@ import { Tenant } from '../../auth/tenant.type';
 import { Purchase, PurchaseItem } from '../domain/purchase';
 import { ReceivePurchaseDto } from '../dto/receive-purchase.dto';
 import { AccountingOperationalPostingService } from '../../accounting/accounting-operational-posting.service';
+import { InventoryValuationService } from '../../inventory/inventory-valuation.service';
 
 const ENDPOINT = 'purchases.receive';
 
@@ -24,6 +25,7 @@ export class ReceivePurchaseUseCase {
     private readonly db: DatabaseService,
     private readonly accountingPosting: AccountingOperationalPostingService,
     private readonly auditEvents: AuditEventsService = new AuditEventsService(),
+    private readonly inventoryValuation: InventoryValuationService = new InventoryValuationService(),
   ) {}
 
   async execute(tenant: Tenant, dto: ReceivePurchaseDto, idempotencyKey: string | undefined): Promise<ReceivePurchaseResult> {
@@ -108,7 +110,11 @@ export class ReceivePurchaseUseCase {
           .insert(purchaseItems)
           .values({ purchaseId, variantId: item.variantId, quantity: item.quantity.value, unitPrice: item.unitPrice.toDecimalString() })
           .returning();
+        if (!row) throw new ConflictException('A purchase item could not be persisted');
         itemRows.push(row);
+        await this.inventoryValuation.receive(
+          tx, tenant.businessId, item.variantId, item.quantity.value, item.unitPrice.toDecimalString(),
+        );
 
         // Additive, single-statement upsert: unlike the sale/decrement
         // path, this does not need an explicit FOR UPDATE lock to be
