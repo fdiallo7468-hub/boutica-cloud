@@ -524,7 +524,7 @@ export class AccountingController {
       if (line.side !== 'DEBIT' && line.side !== 'CREDIT') {
         throw new BadRequestException(`lines[${index}].side must be DEBIT or CREDIT`);
       }
-      if (typeof line.amountBasis !== 'string' || !amountBases[sourceType].has(line.amountBasis)) {
+      if (typeof line.amountBasis !== 'string' || !amountBases[sourceType]?.has(line.amountBasis)) {
         throw new BadRequestException(`lines[${index}].amountBasis is not supported for ${sourceType}`);
       }
       const percentage = line.percentage === undefined ? '100.0000' : String(line.percentage);
