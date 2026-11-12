@@ -421,9 +421,6 @@ export class FinanceService {
         throw new ConflictException('Une créance existe déjà pour cette vente');
       }
 
-      const remainingBalance = totalAmount - dto.amountPaidNow;
-      const status = dto.amountPaidNow > 0 ? 'PARTIALLY_PAID' : 'PENDING';
-
       const [receivable] = await tx
         .insert(receivables)
         .values({
