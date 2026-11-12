@@ -45,8 +45,7 @@ describe('NotificationOutboxProcessor', () => {
   }
 
   it('keeps failed delivery pending with a retry time instead of losing the event', async () => {
-    const now = new Date();
-    const event = {
+        const event = {
       id: 'outbox-id',
       businessId: 'business-id',
       eventType: 'sale.completed',
