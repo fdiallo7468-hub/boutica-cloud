@@ -1,3 +1,5 @@
+import { PERMISSIONS } from '../auth/permissions/permission-catalog';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import { Body, Controller, Get, Headers, HttpCode, HttpStatus, NotFoundException, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { and, count, desc, eq, gte, lte } from 'drizzle-orm';
@@ -17,6 +19,7 @@ export class ReturnsController {
     private readonly db: DatabaseService,
   ) {}
 
+  @RequirePermissions(PERMISSIONS.SALES_CANCEL)
   @Post()
   @HttpCode(HttpStatus.CREATED)
   async create(@CurrentTenant() tenant: Tenant, @Body() body: CreateReturnDto, @Headers('idempotency-key') idempotencyKey?: string) {
@@ -26,6 +29,7 @@ export class ReturnsController {
 
   // NEW (v2.1, client-integration audit P0 §7) — same reasoning as
   // sales/purchases: thin, read-only, no invariant to protect.
+  @RequirePermissions(PERMISSIONS.SALES_READ)
   @Get()
   async list(@CurrentTenant() tenant: Tenant, @Query() query: ListReturnsQueryDto) {
     const filters = [eq(returns.businessId, tenant.businessId)];
@@ -47,6 +51,7 @@ export class ReturnsController {
     return { data, page: query.page, pageSize: query.pageSize, total };
   }
 
+  @RequirePermissions(PERMISSIONS.SALES_READ)
   @Get(':id')
   async get(@CurrentTenant() tenant: Tenant, @Param('id', ParseUUIDPipe) id: string) {
     const [ret] = await this.db.db
