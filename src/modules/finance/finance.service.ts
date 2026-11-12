@@ -405,6 +405,9 @@ export class FinanceService {
       if (dto.amountPaidNow >= totalAmount) {
         throw new BadRequestException('Le montant déjà payé doit être inférieur au total de la vente');
       }
+      if (dto.amountPaidNow > 0 && !dto.paymentMethod) {
+        throw new BadRequestException('Le moyen de paiement est obligatoire lorsqu’un montant est déjà réglé');
+      }
 
       const [existingReceivable] = await tx
         .select({ id: receivables.id })
@@ -429,10 +432,13 @@ export class FinanceService {
           customerId: dto.customerId,
           saleId: sale.id,
           initialAmount: totalAmount.toFixed(2),
-          paidAmount: dto.amountPaidNow.toFixed(2),
-          remainingBalance: remainingBalance.toFixed(2),
+          // Initial cash settlement is recorded as a real payment below.
+          // The receivable is created at its gross value first so its
+          // customer ledger cannot drift from the accounting control account.
+          paidAmount: '0.00',
+          remainingBalance: totalAmount.toFixed(2),
           dueDate,
-          status,
+          status: 'PENDING',
           notes: dto.notes || null,
         })
         .returning();
@@ -441,16 +447,36 @@ export class FinanceService {
         throw new InternalServerErrorException('Échec de la génération de la créance');
       }
 
-      // Enqueue notification outbox
+      let initialPayment: unknown = null;
+      if (dto.amountPaidNow > 0) {
+        initialPayment = await this.recordPayment(tenant, {
+          customerId: dto.customerId,
+          saleId: sale.id,
+          receivableId: receivable.id,
+          amount: dto.amountPaidNow,
+          paymentMethod: dto.paymentMethod!,
+          transactionReference: dto.transactionReference,
+          notes: dto.notes,
+        }, tx);
+      }
+
+      const [currentReceivable] = await tx.select().from(receivables).where(and(
+        eq(receivables.id, receivable.id),
+        eq(receivables.businessId, tenant.businessId),
+      )).limit(1);
+      if (!currentReceivable) throw new InternalServerErrorException('La créance créée est introuvable après règlement initial');
+
+      // Enqueue the creation event with the reconciled balance after the
+      // optional initial payment has been persisted in the same transaction.
       await this.outboxService.enqueue(tx, {
         businessId: tenant.businessId,
         eventType: NOVU_EVENT_TYPES.RECEIVABLE_CREATED,
-        deduplicationKey: `receivable-created-${receivable.id}`,
+        deduplicationKey: `receivable-created-${currentReceivable.id}`,
         payload: {
-          receivableId: receivable.id,
-          saleId: receivable.saleId,
-          initialAmount: dto.totalAmount,
-          remainingBalance,
+          receivableId: currentReceivable.id,
+          saleId: currentReceivable.saleId,
+          initialAmount: currentReceivable.initialAmount,
+          remainingBalance: Number(currentReceivable.remainingBalance),
           customerName: customer.name,
           dueDate: dueDate ? dueDate.toISOString() : null,
           recipientId: tenant.userId,
@@ -463,10 +489,10 @@ export class FinanceService {
         locationId: sale.locationId,
         action: 'receivable.created',
         resourceType: 'receivable',
-        resourceId: receivable.id,
-        metadata: { initialAmount: receivable.initialAmount, amountPaidNow: receivable.paidAmount, saleId: sale.id },
+        resourceId: currentReceivable.id,
+        metadata: { initialAmount: currentReceivable.initialAmount, amountPaidNow: currentReceivable.paidAmount, saleId: sale.id },
       });
-      return receivable;
+      return { ...currentReceivable, initialPayment };
     });
   }
 
