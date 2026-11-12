@@ -115,4 +115,6 @@ Le détail des événements, des bases de calcul, des prérequis de domaine et d
 
 ## État de validation
 
-La Phase 4.3 reste incomplète au-delà des dépenses. La Phase 4.4 est la dernière étape de cette Phase 4 ; aucune étape 4.5 ou 4.6 ne doit être ajoutée. Les scénarios d'acceptation PostgreSQL 4.1, 4.2 et 4.4 sont intégrés ; la clôture technique dépend du passage complet de la CI sur le dernier SHA de la PR, de la revue finale et de la décision explicite sur le périmètre opérationnel restant. Aucune conformité SYSCOHADA réglementaire n'est revendiquée sans revue professionnelle.
+La Phase 4.3 couvre désormais l'intégration comptable configurée des ventes, achats reçus, paiements, annulations de paiements et ventes, retours, ainsi que les dépenses. Elle demeure ouverte pour la valorisation des ajustements de stock, le traitement des retours avec remises, les remboursements/avoirs et les scénarios opérationnels de réconciliation restants. Les créations de créances ne génèrent pas de double écriture de vente ; un règlement initial est conservé comme paiement lié.
+
+La Phase 4.4 est la dernière étape de cette Phase 4 ; aucune étape 4.5 ou 4.6 ne doit être ajoutée. La clôture technique dépend du passage complet de la CI sur le dernier SHA de la PR, de la revue finale des écritures et des scénarios PostgreSQL, ainsi que de la validation du référentiel et des modèles par un professionnel compétent. Aucune conformité SYSCOHADA réglementaire n'est revendiquée sans revue professionnelle.
