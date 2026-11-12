@@ -25,6 +25,7 @@ import { NotificationOutboxService } from '../notifications/notification-outbox.
 import { NOVU_EVENT_TYPES } from '../notifications/novu.types';
 import { LoyaltyLedgerService } from '../loyalty/loyalty-ledger.service';
 import { AccountingOperationalPostingService } from '../accounting/accounting-operational-posting.service';
+import { InventoryValuationService } from '../inventory/inventory-valuation.service';
 import { OfflineOperationItemDto, RegisterDeviceDto, SyncPushDto } from './dto/sync.dto';
 
 @Injectable()
@@ -37,6 +38,7 @@ export class SyncService {
     private readonly outboxService: NotificationOutboxService,
     private readonly accountingPosting: AccountingOperationalPostingService,
     private readonly loyaltyLedger: LoyaltyLedgerService = new LoyaltyLedgerService(),
+    private readonly inventoryValuation: InventoryValuationService = new InventoryValuationService(),
   ) {}
 
   /**
@@ -366,7 +368,7 @@ export class SyncService {
                   throw new BadRequestException('Customer does not belong to this business or is inactive');
                 }
               }
-              const variantSnapshots = new Map<string, { sellingPrice: string; purchasePrice: string }>();
+              const variantSnapshots = new Map<string, { sellingPrice: string }>();
               for (const item of p.items) {
                 if (!item || typeof item.variantId !== 'string' || !Number.isSafeInteger(item.quantity) || item.quantity <= 0) {
                   throw new BadRequestException('Each sale item requires a valid variant and a positive integer quantity');
@@ -375,7 +377,7 @@ export class SyncService {
                   throw new BadRequestException('Sale item unit prices must be finite non-negative numbers');
                 }
                 const [ownedVariant] = await operationTx
-                  .select({ id: variants.id, sellingPrice: variants.sellingPrice, purchasePrice: variants.purchasePrice })
+                  .select({ id: variants.id, sellingPrice: variants.sellingPrice })
                   .from(variants)
                   .innerJoin(products, eq(variants.productId, products.id))
                   .where(and(
@@ -390,10 +392,7 @@ export class SyncService {
                 if (Math.round(Number(item.unitPrice) * 100) !== Math.round(Number(ownedVariant.sellingPrice) * 100)) {
                   throw new ConflictException('Offline sale price no longer matches the server catalog; reconcile the sale before syncing');
                 }
-                variantSnapshots.set(item.variantId, {
-                  sellingPrice: ownedVariant.sellingPrice,
-                  purchasePrice: ownedVariant.purchasePrice,
-                });
+                variantSnapshots.set(item.variantId, { sellingPrice: ownedVariant.sellingPrice });
               }
 
               const [sale] = await operationTx
@@ -423,12 +422,15 @@ export class SyncService {
                 for (const item of p.items) {
                   const snapshot = variantSnapshots.get(item.variantId);
                   if (!snapshot) throw new ConflictException('A sale item catalog snapshot is missing');
+                  const costAtSale = await this.inventoryValuation.consume(
+                    operationTx, tenant.businessId, item.variantId, item.quantity,
+                  );
                   const [saleItem] = await operationTx.insert(saleItems).values({
                     saleId: entityId!,
                     variantId: item.variantId,
                     quantity: item.quantity,
                     unitPrice: snapshot.sellingPrice,
-                    costAtSale: snapshot.purchasePrice,
+                    costAtSale,
                   }).returning();
                   if (!saleItem) throw new ConflictException('A synchronized sale item could not be persisted');
                   saleItemRows.push(saleItem);
